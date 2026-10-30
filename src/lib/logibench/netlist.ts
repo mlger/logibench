@@ -1,5 +1,5 @@
 import { UnionFind } from './unionFind';
-import { holeKey, isRailRow, parseHoleKey, BOARD_SPECS } from './geometry';
+import { holeKey, isRailRow, parseHoleKey, BOARD_SPECS, railGroups, RAIL_ROWS } from './geometry';
 import type { HoleRef, Net, NetPin, PartInstance, Project, Wire } from './types';
 
 /**
@@ -60,15 +60,17 @@ export function buildNetlist(project: Project, opts?: { switchStates?: Map<strin
         uf.union(node.get(holeKey({ board: board.id, col, row: botRows[i] }))!, node.get(holeKey({ board: board.id, col, row: botRows[i + 1] }))!);
       }
     }
-    // rails: layout-dependent breaks (M2 adds full per-group unions)
-    const mid = Math.ceil(cols / 2);
-    for (const row of ['+T', '-T', '+B', '-B'] as const) {
-      for (let col = 1; col < cols; col++) {
-        // center-split: no union across the middle break
-        if (board.railLayout === 'center-split' && col === mid) continue;
-        const a = node.get(holeKey({ board: board.id, col, row }));
-        const b = node.get(holeKey({ board: board.id, col: col + 1, row }));
-        if (a !== undefined && b !== undefined) uf.union(a, b);
+    // rails: unions follow the board's rail layout — independent groups
+    // (continuous = one span, center-split = two halves, groups5 = 5-hole
+    // groups staggered per line; gap columns hold no holes)
+    for (const row of RAIL_ROWS) {
+      const line = row === '+T' || row === '+B' ? 0 : 1;
+      for (const g of railGroups(board.kind, board.railLayout, line)) {
+        for (let col = g.start; col < g.end; col++) {
+          const a = node.get(holeKey({ board: board.id, col, row }));
+          const b = node.get(holeKey({ board: board.id, col: col + 1, row }));
+          if (a !== undefined && b !== undefined) uf.union(a, b);
+        }
       }
     }
   }

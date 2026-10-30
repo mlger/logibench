@@ -3,8 +3,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HoleRef, PartInstance, Project, SimResult } from '@/lib/logibench/types';
 import {
-  BOARD_SPECS, PITCH, boardDims, colX, chipPackage, checkPlacement, holeKey,
-  nearestHole, parseHoleKey, partLabel, rowY, sameHole,
+  BOARD_SPECS, PITCH, boardDims, colX, chipPackage, checkPlacement, holeExists, holeKey,
+  nearestHole, parseHoleKey, partLabel, railGroups, rowY, sameHole,
 } from '@/lib/logibench/geometry';
 import { netHolesOf, useEditor } from '@/store/projectStore';
 import { useDnd } from '@/store/dnd';
@@ -85,7 +85,7 @@ function CanvasInner(props: Props & { initialScale: number }) {
       if (!svg) return null;
       const rect = svg.getBoundingClientRect();
       const v = viewRef.current;
-      return nearestHole(board.kind, (cx - rect.left - v.x) / v.scale, (cy - rect.top - v.y) / v.scale, board.id);
+      return nearestHole(board.kind, board.railLayout, (cx - rect.left - v.x) / v.scale, (cy - rect.top - v.y) / v.scale, board.id);
     };
     const trashHit = (cx: number, cy: number) => {
       const el = trashRef.current;
@@ -277,21 +277,33 @@ function CanvasInner(props: Props & { initialScale: number }) {
         <g transform={`translate(${view.x},${view.y}) scale(${view.scale})`}>
           {/* board base */}
           <rect x={6} y={4} width={dims.width - 4} height={dims.height - 8} rx={10} fill={BOARD_BG} stroke="#d6d3d1" strokeWidth={2} />
-          {/* rail tint lines */}
-          <rect x={dims.padX - 10} y={dims.yPlusT - 7} width={cols * PITCH + 12} height={PITCH + 6} rx={6} fill="#fee2e2" opacity={0.55} />
-          <rect x={dims.padX - 10} y={dims.yMinusT - 7} width={cols * PITCH + 12} height={PITCH + 6} rx={6} fill="#e7e5e4" opacity={0.8} />
-          <rect x={dims.padX - 10} y={dims.yPlusB - 7} width={cols * PITCH + 12} height={PITCH + 6} rx={6} fill="#fee2e2" opacity={0.55} />
-          <rect x={dims.padX - 10} y={dims.yMinusB - 7} width={cols * PITCH + 12} height={PITCH + 6} rx={6} fill="#e7e5e4" opacity={0.8} />
-          {board.railLayout === 'center-split' && (
-            <rect
-              x={dims.padX + Math.ceil(cols / 2) * PITCH - PITCH / 2 - 5}
-              y={dims.yPlusT - 8}
-              width={10}
-              height={dims.yMinusB - dims.yPlusT + 16}
-              fill="#78716c"
-              opacity={0.35}
-            />
-          )}
+          {/* rail art — per-group tint + silk lines (red = +, blue = −), like the full-plus reference photo */}
+          {(['+T', '-T', '+B', '-B'] as const).map((row) => {
+            const line = row === '+T' || row === '+B' ? 0 : 1;
+            const groups = railGroups(board.kind, board.railLayout, line);
+            const y = rowY(board.kind, row);
+            const isPlus = row === '+T' || row === '+B';
+            const silkColor = isPlus ? '#dc2626' : '#2563eb';
+            const silkY = (row === '+T' || row === '+B') ? y - 8 : y + 8;
+            return (
+              <g key={row}>
+                {groups.map((g, gi) => (
+                  <rect
+                    key={gi} x={colX(board.kind, g.start) - 7} y={y - 7}
+                    width={(g.end - g.start) * PITCH + 6} height={PITCH - 2} rx={4}
+                    fill={isPlus ? '#fee2e2' : '#dbeafe'} opacity={0.5}
+                  />
+                ))}
+                {groups.map((g, gi) => (
+                  <line
+                    key={`s${gi}`} x1={colX(board.kind, g.start) - 9} y1={silkY}
+                    x2={colX(board.kind, g.end) + 9} y2={silkY}
+                    stroke={silkColor} strokeWidth={1.6} strokeLinecap="round" opacity={0.85}
+                  />
+                ))}
+              </g>
+            );
+          })}
           {/* channel shadow */}
           <rect
             x={dims.padX - 10}
@@ -331,6 +343,8 @@ function CanvasInner(props: Props & { initialScale: number }) {
           {rows.map((row) =>
             Array.from({ length: cols }, (_, ci) => {
               const col = ci + 1;
+              // groups5 rail gaps are bare plastic — no hole there
+              if (!holeExists(board.kind, board.railLayout, row, col)) return null;
               const key = `${board.id}:${col}:${row}`;
               const p = { x: colX(board.kind, col), y: rowY(board.kind, row) };
               const level = holeLevel(key);
@@ -366,12 +380,27 @@ function CanvasInner(props: Props & { initialScale: number }) {
             }),
           )}
 
-          {/* column numbers */}
+          {/* column numbers — above the top rail and in the channel, like the reference */}
           {Array.from({ length: cols }, (_, ci) => {
             const col = ci + 1;
             if (col % 5 !== 0) return null;
+            const yChannel = (rowY(board.kind, 'e') + rowY(board.kind, 'f')) / 2 + 3;
             return (
-              <text key={col} x={colX(board.kind, col)} y={dims.yPlusT - 10} textAnchor="middle" fontSize={8} fill="#78716c" fontFamily="ui-monospace, monospace">{col}</text>
+              <g key={col}>
+                <text x={colX(board.kind, col)} y={dims.yPlusT - 11} textAnchor="middle" fontSize={8} fill="#78716c" fontFamily="ui-monospace, monospace">{col}</text>
+                <text x={colX(board.kind, col)} y={yChannel} textAnchor="middle" fontSize={8} fill="#a8a29e" fontFamily="ui-monospace, monospace">{col}</text>
+              </g>
+            );
+          })}
+
+          {/* row letters on both edges (strip rows) */}
+          {(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'] as const).map((row) => {
+            const y = rowY(board.kind, row) + 3;
+            return (
+              <g key={row}>
+                <text x={dims.padX - 14} y={y} textAnchor="middle" fontSize={8} fill="#78716c" fontFamily="ui-monospace, monospace">{row.toUpperCase()}</text>
+                <text x={dims.padX + cols * PITCH + 8} y={y} textAnchor="middle" fontSize={8} fill="#78716c" fontFamily="ui-monospace, monospace">{row.toUpperCase()}</text>
+              </g>
             );
           })}
 

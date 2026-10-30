@@ -1,7 +1,7 @@
 import type {
   Breadboard, BoardKind, HoleRef, PartInstance, PartType, Project, RailLayout, RowName, Wire,
 } from './types';
-import { ALL_ROWS, BOARD_SPECS, boardDims } from './geometry';
+import { ALL_ROWS, BOARD_SPECS, boardDims, holeExists } from './geometry';
 
 /**
  * Project sanitizer / migration (plan §8).
@@ -114,17 +114,20 @@ export function migrateProject(raw: unknown): MigrationResult | null {
   const colsOf = (boardId: string): number =>
     BOARD_SPECS[boards.find((b) => b.id === boardId)?.kind ?? 'half400'].cols;
 
-  /** hole is structurally valid: known board, row on the board, col in range */
+  /** hole is structurally valid: known board, row on the board, col in range,
+   *  and the tie-point physically exists (groups5 rail gaps are bare plastic) */
   const validHole = (h: unknown): h is HoleRef => {
     if (!isObj(h)) return false;
     const board = str(h.board, 24);
     const col = num(h.col);
     const row = h.row as RowName;
-    return (
-      board !== undefined && boardIds.has(board) &&
-      col !== undefined && Number.isInteger(col) && col >= 1 && col <= colsOf(board) &&
-      (ALL_ROWS as readonly string[]).includes(row)
-    );
+    if (
+      board === undefined || !boardIds.has(board) ||
+      col === undefined || !Number.isInteger(col) || col < 1 || col > colsOf(board) ||
+      !(ALL_ROWS as readonly string[]).includes(row)
+    ) return false;
+    const b = boards.find((x) => x.id === board)!;
+    return holeExists(b.kind, b.railLayout, row, col);
   };
 
   /* ---- parts ---- */

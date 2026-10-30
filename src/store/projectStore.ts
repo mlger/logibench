@@ -5,12 +5,13 @@ import type {
   HoleRef, PartInstance, PartType, Project, SimResult, Wire,
 } from '@/lib/logibench/types';
 import {
-  ALL_ROWS, BOARD_SPECS, checkPlacement, holeKey, pinCount, sameHole,
+  ALL_ROWS, BOARD_SPECS, checkPlacement, holeExists, holeKey, pinCount, sameHole,
 } from '@/lib/logibench/geometry';
 import { buildNetlist } from '@/lib/logibench/netlist';
 import { Simulator } from '@/lib/logibench/sim';
 import { migrateProject } from '@/lib/logibench/migrate';
 import { emptyProject, demo7447, demo4511 } from '@/lib/logibench/demo';
+import type { RailLayout } from '@/lib/logibench/types';
 
 export type Selection = { kind: 'part' | 'wire'; id: string } | null;
 export type Mode = 'select' | 'wire' | 'simulate';
@@ -37,9 +38,12 @@ export interface EditorState {
   hoverHole: string | null;
   projectId: string | null; // saved project id (backend)
   wireColor: string;
+  /** transient user-facing message (e.g. rejected wire drop) */
+  flash: string | null;
   /** live (non-persisted) switch/button states while simulating */
   liveSwitches: Record<string, boolean>;
 
+  setFlash: (msg: string | null) => void;
   setWireColor: (c: string) => void;
 
   setName: (name: string) => void;
@@ -76,7 +80,7 @@ export interface EditorState {
   loadProject: (p: unknown) => void;
   setSavedId: (id: string | null) => void;
   setBoardKind: (kind: 'half400' | 'full830') => void;
-  toggleRailsSplit: () => void;
+  setRailLayout: (layout: RailLayout) => void;
 }
 
 let simulator: Simulator | null = null;
@@ -107,7 +111,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   hoverHole: null,
   projectId: null,
   wireColor: '#ea580c',
+  flash: null,
   liveSwitches: {},
+
+  setFlash: (msg) => set({ flash: msg }),
 
   setWireColor: (c) => set({ wireColor: c }),
 
@@ -172,6 +179,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
     // two-pin (or 3-pin) parts: pick holes one by one
     if (!anchor) {
+      if (!holeExists(board.kind, board.railLayout, hole.row, hole.col)) return;
       set({ placement: { type, defId, anchor: hole } });
       return;
     }
@@ -181,9 +189,13 @@ export const useEditor = create<EditorState>((set, get) => ({
       // third pin on the next column
       pins.push({ board: hole.board, col: hole.col + 1, row: hole.row });
     }
-    // occupancy check
+    // occupancy check (a tie-point holds exactly one lead) + rail-gap guard
     const occ = new Set(project.parts.flatMap((p) => p.pins.map((h) => `${h.board}:${h.col}:${h.row}`)));
-    if (pins.some((h) => occ.has(`${h.board}:${h.col}:${h.row}`)) || sameHole(pins[0], pins[1])) {
+    if (
+      pins.some((h) => occ.has(`${h.board}:${h.col}:${h.row}`)) ||
+      pins.some((h) => !holeExists(board.kind, board.railLayout, h.row, h.col)) ||
+      sameHole(pins[0], pins[1])
+    ) {
       set({ placement: null });
       return;
     }
@@ -216,6 +228,23 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   addWire: (from, to, color) => {
+    const project = get().project;
+    const boardOf = (h: HoleRef) => project.boards.find((b) => b.id === h.board) ?? project.boards[0];
+    const bf = boardOf(from);
+    const bt = boardOf(to);
+    // a tie-point holds one lead, and groups5 rail gaps are bare plastic
+    const occ = new Set([
+      ...project.parts.flatMap((p) => p.pins.map((h) => holeKey(h))),
+      ...project.wires.flatMap((w) => [holeKey(w.from), holeKey(w.to)]),
+    ]);
+    if (
+      occ.has(holeKey(from)) || occ.has(holeKey(to)) ||
+      !holeExists(bf.kind, bf.railLayout, from.row, from.col) ||
+      !holeExists(bt.kind, bt.railLayout, to.row, to.col)
+    ) {
+      set({ flash: 'That hole is taken — one lead per tie-point.' });
+      return;
+    }
     const w: Wire = { id: nextId('w'), from, to, color: color ?? get().wireColor };
     get().commit((p) => { p.wires.push(w); });
     set({ selection: { kind: 'wire', id: w.id } });
@@ -367,10 +396,9 @@ export const useEditor = create<EditorState>((set, get) => ({
     });
   },
 
-  toggleRailsSplit: () => {
+  setRailLayout: (layout) => {
     get().commit((p) => {
-      const b = p.boards[0];
-      p.boards = [{ ...b, railLayout: b.railLayout === 'center-split' ? 'continuous' : 'center-split' }];
+      p.boards = [{ ...p.boards[0], railLayout: layout }];
     });
   },
 }));

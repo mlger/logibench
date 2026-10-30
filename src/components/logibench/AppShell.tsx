@@ -54,6 +54,14 @@ export default function AppShell() {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [saveMsg, setSaveMsg] = useState('');
+  const flash = useEditor((s) => s.flash);
+
+  /* ---- transient flash message (rejected drops etc.) ---- */
+  useEffect(() => {
+    if (!flash) return;
+    const t = setTimeout(() => useEditor.getState().setFlash(null), 2600);
+    return () => clearTimeout(t);
+  }, [flash]);
 
   /* ---- simulation loop ---- */
   useEffect(() => {
@@ -249,7 +257,7 @@ export default function AppShell() {
               <Palette />
             </aside>
             <section className="flex min-w-0 flex-col gap-3" aria-label="Breadboard">
-              <div className="h-[420px] lg:h-[440px]">
+              <div className="relative h-[420px] lg:h-[440px]">
                 <BreadboardCanvas
                   project={project}
                   simResult={simResult}
@@ -267,6 +275,11 @@ export default function AppShell() {
                   onSwitchToggle={(id) => useEditor.getState().toggleSwitch(id)}
                   onButtonPress={(id, closed) => useEditor.getState().pressButton(id, closed)}
                 />
+                {flash && (
+                  <div role="status" className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-md bg-stone-900/90 px-3 py-1.5 text-[11px] font-medium text-amber-200 shadow-lg">
+                    {flash}
+                  </div>
+                )}
               </div>
               <div className="h-[240px]">
                 <BottomPanel />

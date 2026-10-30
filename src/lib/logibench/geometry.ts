@@ -1,4 +1,4 @@
-import type { Breadboard, HoleRef, PartInstance, RowName } from './types';
+import type { Breadboard, HoleRef, PartInstance, RailLayout, RowName } from './types';
 
 /**
  * Breadboard geometry — single source of truth for both the SVG canvas and
@@ -65,6 +65,53 @@ export function isRailRow(row: RowName): boolean {
   return (RAIL_ROWS as string[]).includes(row);
 }
 
+/* ---------------- Rail groups ("full-plus" realism) ---------------- */
+
+export interface ColSpan {
+  start: number; // 1-based, inclusive
+  end: number; // inclusive
+}
+
+/**
+ * Contiguous tied column ranges of ONE rail line.
+ * line 0 = the '+' row of a side (+T/+B), line 1 = the '−' row (−T/−B).
+ *
+ * groups5: 5 tied holes, 2-hole gap, period 7 — matching the full-plus
+ * reference photo; the two lines of a side are staggered by 3 columns so the
+ * gaps of one line align with the holes of the other. Gap columns have NO
+ * holes at all (see holeExists).
+ */
+export function railGroups(kind: Breadboard['kind'], layout: RailLayout, line: 0 | 1): ColSpan[] {
+  const cols = BOARD_SPECS[kind].cols;
+  if (layout === 'continuous') return [{ start: 1, end: cols }];
+  if (layout === 'center-split') {
+    const mid = Math.ceil(cols / 2);
+    return [
+      { start: 1, end: mid },
+      { start: mid + 1, end: cols },
+    ];
+  }
+  const first = line === 0 ? 2 : 5;
+  const groups: ColSpan[] = [];
+  for (let s = first; s + 4 <= cols; s += 7) groups.push({ start: s, end: s + 4 });
+  return groups;
+}
+
+function railLineOf(row: RowName): 0 | 1 {
+  return row === '+T' || row === '+B' ? 0 : 1;
+}
+
+/**
+ * Does a tie-point hole physically exist at (row, col)?
+ * With groups5 rails, the 2-hole gaps are bare plastic — nothing can be
+ * plugged there.
+ */
+export function holeExists(kind: Breadboard['kind'], layout: RailLayout, row: RowName, col: number): boolean {
+  if (!isRailRow(row)) return true;
+  if (layout !== 'groups5') return true;
+  return railGroups(kind, layout, railLineOf(row)).some((g) => col >= g.start && col <= g.end);
+}
+
 /**
  * Inverse mapping: board-space coordinates (px, after pan/zoom removal) to the
  * nearest tie-point hole. Returns null when the point is off the board or not
@@ -72,6 +119,7 @@ export function isRailRow(row: RowName): boolean {
  */
 export function nearestHole(
   kind: Breadboard['kind'],
+  layout: RailLayout,
   x: number,
   y: number,
   board: string,
@@ -80,17 +128,16 @@ export function nearestHole(
   const spec = BOARD_SPECS[kind];
   const col = Math.round((x - d.padX) / PITCH) + 1;
   if (col < 1 || col > spec.cols) return null;
-  let bestRow: RowName = ALL_ROWS[0];
-  let bestDist = Infinity;
-  for (const row of ALL_ROWS) {
-    const dist = Math.abs(rowY(kind, row) - y);
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestRow = row;
-    }
+  // rows sorted by vertical distance; pick the nearest one that exists
+  // (groups5 rail gaps are bare plastic — snap past them)
+  const byDist = [...ALL_ROWS].sort(
+    (a, b) => Math.abs(rowY(kind, a) - y) - Math.abs(rowY(kind, b) - y),
+  );
+  for (const row of byDist) {
+    if (Math.abs(rowY(kind, row) - y) > PITCH * 0.75) return null;
+    if (holeExists(kind, layout, row, col)) return { board, col, row };
   }
-  if (bestDist > PITCH * 0.75) return null;
-  return { board, col, row: bestRow };
+  return null;
 }
 
 /** Which rail line does a chip DIP pin column sit near? (for quick auto-wiring UI hints) */

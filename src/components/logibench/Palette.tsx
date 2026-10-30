@@ -193,13 +193,31 @@ export default function Palette() {
           >
             Board: <span className="font-medium">{project.boards[0].kind === 'half400' ? 'Half-size (400 pt)' : 'Full-size (830 pt)'}</span> — switch
           </button>
-          <button
-            type="button"
-            onClick={() => useEditor.getState().toggleRailsSplit()}
-            className={`w-full rounded-lg border px-2 py-1.5 text-left text-[11px] ${project.boards[0].railLayout === 'center-split' ? 'border-amber-400 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-700'} hover:bg-stone-50`}
-          >
-            Rails split in middle: <span className="font-medium">{project.boards[0].railLayout === 'center-split' ? 'YES (classic trap!)' : 'no'}</span>
-          </button>
+          <div className="rounded-lg border border-stone-200 bg-white px-2 py-1.5">
+            <div className="text-[11px] text-stone-700">
+              Rail layout: <span className="font-medium">{project.boards[0].railLayout === 'continuous' ? 'continuous' : project.boards[0].railLayout === 'center-split' ? 'center split' : '5-hole groups'}</span>
+            </div>
+            <div className="mt-1.5 grid grid-cols-3 gap-1" role="group" aria-label="Rail layout">
+              {([
+                ['continuous', 'Solid'],
+                ['center-split', 'Split'],
+                ['groups5', 'Groups'],
+              ] as const).map(([layout, label]) => (
+                <button
+                  key={layout} type="button"
+                  onClick={() => useEditor.getState().setRailLayout(layout)}
+                  aria-pressed={project.boards[0].railLayout === layout}
+                  title={layout === 'groups5' ? 'Full-plus style: independent 5-hole groups with gaps (classic trap!)' : layout === 'center-split' ? 'Rails broken once in the middle' : 'Each rail line is one net'}
+                  className={`rounded-md border px-1 py-1 text-[10px] font-medium ${project.boards[0].railLayout === layout ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {project.boards[0].railLayout === 'groups5' && (
+              <p className="mt-1 text-[9px] leading-snug text-stone-400">Rails broken into 5-hole groups — sections must be bridged to share power.</p>
+            )}
+          </div>
           <p className="flex items-start gap-1 text-[10px] leading-snug text-stone-400">
             <GripHorizontal className="mt-0.5 h-3 w-3 shrink-0" />
             Drag parts from here onto the board (or click, then click holes). Drag placed parts to move them — drop on the trash target to remove. Drag from any hole to draw a wire. ESC cancels · Delete removes selection · hover any hole to light up its net.

@@ -1,6 +1,6 @@
 import type { Net, NetLevel, PartInstance, Project, SimIssue } from './types';
 import { getChipDef, FAMILIES } from '@/data/chips';
-import { holeKey, parseHoleKey } from './geometry';
+import { holeKey, parseHoleKey, isRailRow } from './geometry';
 import type { NetlistResult } from './netlist';
 
 /**
@@ -302,16 +302,42 @@ export function runErc(ctx: ErcContext): SimIssue[] {
     }
   }
 
-  /* --- rule: split rails sanity (hidden classic bug) --- */
-  for (const board of project.boards) {
-    if (board.railLayout && board.railLayout !== 'continuous') {
+  /* --- rule: rail section with loads but no supply contact (full-plus groups) --- */
+  {
+    const boardsById = new Map(project.boards.map((b) => [b.id, b]));
+    for (const net of nets) {
+      if (net.isVccRail && net.isGndRail) continue; // rail-shorted reports this
+      const railHoles = net.holes.filter((k) => isRailRow(parseHoleKey(k).row));
+      if (railHoles.length === 0) continue;
+      if (net.pins.some((np) => np.type === 'supply')) continue;
+      // only pull-up/pull-down legs hanging off the section — no real load
+      if (!net.pins.some((np) => np.type !== 'resistor')) continue;
+      const sample = parseHoleKey(railHoles[0]);
+      const board = boardsById.get(sample.board);
+      const name = board?.label ?? sample.board;
       issues.push({
-        id: nid(), rule: 'rails-split-note', severity: 'info',
-        title: `${board.kind === 'full830' ? 'Full-size' : 'Half-size'} board has SPLIT rails`,
-        detail: 'This board breaks the power rails in the middle. Make sure each half is powered — a classic hidden bug on full-size boards.',
+        id: nid(), rule: 'rail-group-unpowered', severity: 'warning',
+        title: `Rail section near column ${sample.col} (${name}) has connections but no power`,
+        detail: board?.railLayout === 'groups5'
+          ? 'This board\'s power rails are broken into 5-hole groups. This group is isolated from the group your supply feeds — bridge the groups with a jumper or plug the connection into a powered group.'
+          : 'These rail holes reach no supply contact. Bridge them to the powered rail section or move the connection.',
+        why: 'Rail sections that are not bridged are the classic full-plus breadboard trap: the circuit looks wired but that whole rail group is dead.',
         refs: [],
       });
-      break;
+    }
+  }
+
+  /* --- rule: + rail and − rail shorted together --- */
+  {
+    const shorted = nets.find((net) => net.isVccRail && net.isGndRail);
+    if (shorted) {
+      issues.push({
+        id: nid(), rule: 'rail-shorted', severity: 'error',
+        title: '+ rail and − rail are SHORTED together',
+        detail: `One net spans both a + rail line and a − rail line (${shorted.holes.length} holes). A wire or part lead is bridging plus to minus — on the bench this is a dead short across the supply.`,
+        why: 'Direct VCC↔GND short: the supply current is limited only by its own protection, wires heat up and the regulator may shut down or burn.',
+        refs: [],
+      });
     }
   }
 
