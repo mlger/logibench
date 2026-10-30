@@ -25,6 +25,12 @@
  * Every minimized term is also drawn as a colored loop over the cells it
  * groups (the classic pencil loops): term chips and map loops share colors,
  * and hovering/focusing either side traces the group on the other.
+ *
+ * A preset menu, a live seven-segment decoder preview and editable variable
+ * names complete the lab (docs/kmap-lab-presets-vars-preview-plan.md):
+ * presets write the same store cells, the preview renders the stored cells
+ * for a chosen or hovered input, and variable names re-label every surface
+ * without moving any bits.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -33,6 +39,7 @@ import { Check, Lightbulb, Minus, RefreshCw, RotateCcw, X } from 'lucide-react';
 import {
   KMAP_COLS,
   KMAP_ROWS,
+  effectiveNames,
   minimize,
   sopToGates,
   sopToNandGates,
@@ -40,7 +47,10 @@ import {
 } from '@/lib/logibench/kmap';
 import { CLASSIC_SEGMENT_EQUATIONS } from '@/data/chips';
 import type { Family, InventoryItem, KMapCell, MinTerm } from '@/lib/logibench/types';
-import { KMAP_SEGS, useKmapStore, type SegKey } from '@/store/kmapStore';
+import { DEFAULT_VAR_NAMES, KMAP_SEGS, useKmapStore, type SegKey } from '@/store/kmapStore';
+import DecoderPreviewCard from '@/components/logibench/DecoderPreviewCard';
+import PresetMenu from '@/components/logibench/PresetMenu';
+import VarNameEditor from '@/components/logibench/VarNameEditor';
 import TruthTablePanel from '@/components/logibench/TruthTablePanel';
 import {
   AlertDialog,
@@ -307,6 +317,7 @@ const bits2 = (v: number): string => v.toString(2).padStart(2, '0');
  */
 function PlaneGrid({
   segment,
+  names,
   cells,
   edited,
   onCellClick,
@@ -318,6 +329,8 @@ function PlaneGrid({
   activeTerm,
 }: {
   segment: SegKey;
+  /** effective variable names (length 4 or 5) — corner label + aria labels */
+  names: readonly string[];
   cells: KMapCell[];
   edited: boolean[];
   onCellClick: (code: number) => void;
@@ -342,7 +355,7 @@ function PlaneGrid({
   return (
     <div
       role="group"
-      aria-label={`Karnaugh map for segment ${segment}${five ? `, plane E = ${e}` : ''}, 16 minterms`}
+      aria-label={`Karnaugh map for segment ${segment}${five ? `, plane ${names[0]} = ${e}` : ''}, 16 minterms`}
       className={`grid gap-1.5 ${
         compact
           ? 'min-w-[19rem] grid-cols-[2.25rem_repeat(4,3.5rem)]'
@@ -351,9 +364,9 @@ function PlaneGrid({
     >
       {/* corner label */}
       <div className="flex items-center justify-center rounded-md bg-stone-50 font-mono text-[10px] leading-tight text-stone-400">
-        <span>WX</span>
+        <span>{names[0]}{names[1]}</span>
         <span className="mx-0.5 text-stone-300">\</span>
-        <span>YZ</span>
+        <span>{names[2]}{names[3]}</span>
       </div>
       {/* column headers (Y Z) */}
       {KMAP_COLS.map((yz) => (
@@ -388,7 +401,7 @@ function PlaneGrid({
                 data-c={c}
                 data-e={e}
                 onClick={() => onCellClick(code)}
-                aria-label={`minterm m${code}${five ? `, E = ${e}` : ''}, WX=${bits2(wx)}, YZ=${bits2(yz)}, value ${v}. Click to cycle 0, 1, X.`}
+                aria-label={`minterm m${code}${five ? `, ${names[0]} = ${e}` : ''}, ${names[0]}${names[1]}=${bits2(wx)}, ${names[2]}${names[3]}=${bits2(yz)}, value ${v}. Click to cycle 0, 1, X.`}
                 className={`${cellClasses(v, edited[code], compact)}${
                   highlightCode === code ? ' outline-2 outline-amber-500' : ''
                 }`}
@@ -455,11 +468,18 @@ export default function KMapTab() {
   const toggleVarsStore = useKmapStore((s) => s.toggleVars);
   const resetSegmentStore = useKmapStore((s) => s.resetSegment);
   const resetAllStore = useKmapStore((s) => s.resetAll);
+  const varNames = useKmapStore((s) => s.varNames);
+  const setVarNameStore = useKmapStore((s) => s.setVarName);
+  const resetVarNamesStore = useKmapStore((s) => s.resetVarNames);
+  const applyPresetStore = useKmapStore((s) => s.applyPreset);
 
   /* cross-highlight between the K-map and the truth table (ephemeral) */
   const [hoverCode, setHoverCode] = useState<number | null>(null);
   /* term chip hover/focus → emphasize its loop on the map (ephemeral) */
   const [activeTerm, setActiveTerm] = useState<number | null>(null);
+  /* decoder preview: selected input code + segment-letter labels (ephemeral) */
+  const [selectedCode, setSelectedCode] = useState(0);
+  const [showLabels, setShowLabels] = useState(true);
 
   /* map-cell hover/focus → truth-table row highlight (event delegation on the map wrapper).
      data-r/data-c are GRID positions, so they map through the Gray-code row/col
@@ -478,6 +498,11 @@ export default function KMapTab() {
   useEffect(() => {
     void useKmapStore.persist.rehydrate();
   }, []);
+
+  /* the preview's selected code must stay inside the visible plane count */
+  useEffect(() => {
+    if (vars === 4) setSelectedCode((c) => Math.min(c, 15));
+  }, [vars]);
 
   /* ---------- inventory fetch ---------- */
 
@@ -510,7 +535,13 @@ export default function KMapTab() {
     () => (vars === 4 ? cells32.slice(0, 16) : cells32),
     [cells32, vars],
   );
-  const terms = useMemo(() => minimize(cells), [cells]);
+  /* effective variable names — slot 0 is the 5-var MSB, invisible in 4-var mode */
+  const names = useMemo(() => effectiveNames(varNames, vars), [varNames, vars]);
+  const namesCustomized = useMemo(
+    () => varNames.some((v, i) => v !== DEFAULT_VAR_NAMES[i]),
+    [varNames],
+  );
+  const terms = useMemo(() => minimize(cells, names), [cells, names]);
   const gates = useMemo(() => sopToGates(terms), [terms]);
   const nandGates = useMemo(() => sopToNandGates(terms), [terms]);
   /* terms grouping the hovered/focused map or truth-table cell (ephemeral) */
@@ -526,6 +557,15 @@ export default function KMapTab() {
     [cells, segment],
   );
   const isClassic = edited.every((e) => !e);
+  /* segments differing from the classic table anywhere in their 32 cells —
+     arms the preset menu's overwrite guard (docs plan §4.3) */
+  const editedSegs = useMemo(
+    () =>
+      KMAP_SEGS.filter((seg) =>
+        allCells[seg].some((v, i) => v !== CLASSIC_SEGMENT_EQUATIONS[seg][i % 16]),
+      ),
+    [allCells],
+  );
 
   const allDontCare = cells.length > 0 && cells.every((v) => v === 'X');
   const isAlwaysOn = terms.some((t) => t.literals.length === 0);
@@ -620,8 +660,15 @@ export default function KMapTab() {
               </button>
             ))}
           </div>
+          <VarNameEditor
+            varNames={varNames}
+            vars={vars}
+            onRename={setVarNameStore}
+            onReset={resetVarNamesStore}
+          />
         </div>
         <div className="flex items-center gap-2">
+          <PresetMenu segment={segment} editedSegs={editedSegs} onApply={applyPresetStore} />
           <Button
             type="button"
             variant="outline"
@@ -673,8 +720,9 @@ export default function KMapTab() {
         or focus a cell and use the arrow keys. Codes 10–15 default to X.
         {vars === 5 && (
           <>
-            {' '}Five-variable mode: planes stack for E = 0 and E = 1. The E = 1 plane mirrors
-            E = 0 until you edit it, and E = 1 edits survive switching back to 4 variables.
+            {' '}Five-variable mode: planes stack for {names[0]} = 0 and {names[0]} = 1. The{' '}
+            {names[0]} = 1 plane mirrors {names[0]} = 0 until you edit it, and {names[0]} = 1
+            edits survive switching back to 4 variables.
           </>
         )}{' '}
         The truth table below edits the same cells row by row.
@@ -686,7 +734,8 @@ export default function KMapTab() {
           <CardHeader>
             <CardTitle className={HDR}>Karnaugh map — segment {segment}</CardTitle>
             <CardDescription>
-              Rows = W X · Columns = Y Z{vars === 5 ? ' · Planes = E (0 | 1)' : ''} · Gray order
+              Rows = {names[0]} {names[1]} · Columns = {names[2]} {names[3]}
+              {vars === 5 ? ` · Planes = ${names[0]} (0 | 1)` : ''} · Gray order
             </CardDescription>
             <CardAction>
               {!isClassic && (
@@ -734,6 +783,7 @@ export default function KMapTab() {
               {vars === 4 ? (
                 <PlaneGrid
                   segment={segment}
+                  names={names}
                   cells={cells}
                   edited={edited}
                   onCellClick={handleCellClick}
@@ -747,9 +797,10 @@ export default function KMapTab() {
               ) : (
                 <div className="flex flex-col gap-4">
                   <div>
-                    <p className="mb-1.5 font-mono text-xs font-semibold text-stone-600">E = 0</p>
+                    <p className="mb-1.5 font-mono text-xs font-semibold text-stone-600">{names[0]} = 0</p>
                     <PlaneGrid
                       segment={segment}
+                      names={names}
                       cells={cells}
                       edited={edited}
                       onCellClick={handleCellClick}
@@ -762,9 +813,10 @@ export default function KMapTab() {
                     />
                   </div>
                   <div>
-                    <p className="mb-1.5 font-mono text-xs font-semibold text-stone-600">E = 1</p>
+                    <p className="mb-1.5 font-mono text-xs font-semibold text-stone-600">{names[0]} = 1</p>
                     <PlaneGrid
                       segment={segment}
+                      names={names}
                       cells={cells}
                       edited={edited}
                       onCellClick={handleCellClick}
@@ -846,11 +898,24 @@ export default function KMapTab() {
         </Card>
       </div>
 
+      {/* Decoder preview — live 7-segment view over the same store cells */}
+      <DecoderPreviewCard
+        cells={allCells}
+        vars={vars}
+        names={names}
+        hoverCode={hoverCode}
+        selectedCode={selectedCode}
+        onSelect={setSelectedCode}
+        showLabels={showLabels}
+        onToggleLabels={() => setShowLabels((v) => !v)}
+      />
+
       {/* Truth table — datasheet view over the same store cells as the map */}
       <TruthTablePanel
         cells={allCells}
         segment={segment}
         vars={vars}
+        names={names}
         e1Dirty={e1DirtyMap[segment]}
         hoverCode={hoverCode}
         onHover={setHoverCode}
@@ -943,6 +1008,9 @@ export default function KMapTab() {
             The minimizer may group don&apos;t-cares differently and produce an equivalent-cost
             expression — compare literal counts, not exact groupings.
           </p>
+          {namesCustomized && (
+            <p className="text-xs text-stone-400">Classics are shown in the canonical W X Y Z naming.</p>
+          )}
         </CardContent>
       </Card>
     </div>

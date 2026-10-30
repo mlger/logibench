@@ -7,6 +7,32 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Seven-segment decoder preview in the K-map lab: an SVG display card between
+  the SOP grid and the truth table shows which segments light for a chosen
+  input code — and instantly previews whatever map cell or truth-table row is
+  hovered or focused, falling back to the chip selection on leave. Bars use
+  the map legend's language (lit amber with a glow, off stone, don't-care
+  dimmed with a dashed edge), optional a–g letter labels, and 5-variable
+  mode splits the 32 code chips into E = 0 / E = 1 groups
+  (docs/kmap-lab-presets-vars-preview-plan.md).
+- Preset menu in the decoder design lab: fill the active segment (classic,
+  all 0/1/X, odd parity, ≥5 threshold, random) or the whole decoder (classic,
+  blank, and ten "digit d only" single-digit decoders) from one popover, with
+  mini seven-segment previews inside the digit chips. Plane rules match
+  "reset to classic" — 4-var presets never touch stored E = 1 edits, 5-var
+  presets fill both planes and end the mirror — and applying over segments
+  that differ from classic asks for confirmation first since the lab has no
+  undo (docs/kmap-lab-presets-vars-preview-plan.md).
+- Editable variable names in the decoder design lab: rename W X Y Z and the
+  5-variable E via inline header chips (Enter/blur commits, Escape cancels,
+  1–3 letter/digit names, case-insensitive uniqueness, restore-defaults
+  action). Renaming is pure relabeling — bit positions and minterm numbering
+  never move — and re-labels SOP expressions, term chips, the K-map corner
+  label and aria labels, truth-table input columns, and every plane heading.
+  Persisted state moves to `logibench-kmap-v1` version 2 with a migration
+  that injects default names into existing saves
+  (docs/kmap-lab-presets-vars-preview-plan.md).
+
 - Implicant loop overlay in the decoder design lab: every minimized term is
   drawn on the K-map as a translucent rounded rectangle over the cells it
   groups (the classic pencil loops), color-cycled across five hues that match

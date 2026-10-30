@@ -13,6 +13,14 @@ export const VARS_BY_COUNT: { 4: readonly string[]; 5: readonly string[] } = {
   5: ['E', 'W', 'X', 'Y', 'Z'],
 };
 
+/**
+ * Effective variable names for a mode from the persisted 5-slot array
+ * (slot 0 is the 5-var MSB, invisible in 4-var mode).
+ */
+export function effectiveNames(varNames: readonly string[], n: 4 | 5): readonly string[] {
+  return n === 4 ? varNames.slice(1) : varNames;
+}
+
 /** Infer the variable count from a cells array (16 → 4 vars, 32 → 5 vars). */
 export function varCountOf(cells: readonly KMapCell[]): 4 | 5 {
   return cells.length >= 32 ? 5 : 4;
@@ -77,8 +85,15 @@ function popcount(n: number): number {
  * removed all individually-redundant implicants at once — two of them can be
  * jointly required, which left 1-cells uncovered and produced an SOP that did
  * not match the map.)
+ *
+ * `names` labels the variables in the resulting literal strings; the default
+ * keeps the classic W X Y Z / E W X Y Z naming (callers may pass user-renamed
+ * labels — renaming is pure relabeling, it never changes the cover).
  */
-export function minimize(cells: KMapCell[]): MinTerm[] {
+export function minimize(
+  cells: KMapCell[],
+  names: readonly string[] = VARS_BY_COUNT[varCountOf(cells)],
+): MinTerm[] {
   const n = varCountOf(cells);
   const ones: number[] = [];
   const allowed = new Set<number>();
@@ -124,17 +139,21 @@ export function minimize(cells: KMapCell[]): MinTerm[] {
     const redundant = ones.every((m) => others.some((o) => coveredTerm(o.term, o.mask, m)));
     if (redundant) kept.splice(idx, 1);
   }
-  return kept.map((im) => toMinTerm(im, n));
+  return kept.map((im) => toMinTerm(im, n, names));
 }
 
-export function toMinTerm(im: { term: number; mask: number }, n: 4 | 5 = 4): MinTerm {
-  const vars = VARS_BY_COUNT[n];
+export function toMinTerm(
+  im: { term: number; mask: number },
+  n: 4 | 5 = 4,
+  names: readonly string[] = VARS_BY_COUNT[n],
+): MinTerm {
   const parts: string[] = [];
   for (let i = 0; i < n; i++) {
     const bit = n - 1 - i; // MSB first (W is bit 3 in 4-var; E is bit 4 in 5-var)
     if ((im.mask >> bit) & 1) continue;
     const v = (im.term >> bit) & 1;
-    parts.push(v ? vars[i] : `${vars[i]}′`);
+    const name = names[i] ?? VARS_BY_COUNT[n][i];
+    parts.push(v ? name : `${name}′`);
   }
   // Every code whose masked projection matches the base — the map cells this
   // term groups (its 1-cells plus the don't-cares it adopted). The loop

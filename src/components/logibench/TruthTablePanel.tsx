@@ -15,12 +15,15 @@
  *
  * 4-variable mode renders one table (m0…m15); 5-variable mode stacks two
  * (E = 0, E = 1) mirroring the map's two planes, with the "mirrors E = 0"
- * hint until the plane is first edited.
+ * hint until the plane is first edited. Variable names arrive via the
+ * `names` prop (editable in the lab header —
+ * docs/kmap-lab-presets-vars-preview-plan.md §5); renaming re-labels the
+ * input columns and plane headings without touching any cell values.
  */
 
 import type { KeyboardEvent } from 'react';
 import { CLASSIC_SEGMENT_EQUATIONS, DIGIT_GLYPHS } from '@/data/chips';
-import { mintermInputs, VARS_BY_COUNT } from '@/lib/logibench/kmap';
+import { mintermInputs } from '@/lib/logibench/kmap';
 import type { KMapCell } from '@/lib/logibench/types';
 import { KMAP_SEGS, type SegKey } from '@/store/kmapStore';
 import {
@@ -55,8 +58,10 @@ interface PlaneTableProps {
   /** all seven segments' 32-cell store arrays (E = 0 plane, then E = 1) */
   cells: Record<SegKey, KMapCell[]>;
   segment: SegKey;
-  /** variable count — drives the input columns (W X Y Z, or E W X Y Z) */
+  /** variable count — drives minterm decoding (bits per row) */
   n: 4 | 5;
+  /** effective variable names (length = n) — header labels for the input columns */
+  names: readonly string[];
   hoverCode: number | null;
   onHover: (code: number | null) => void;
   onEdit: (seg: SegKey, code: number) => void;
@@ -73,12 +78,12 @@ function PlaneTable({
   cells,
   segment,
   n,
+  names,
   hoverCode,
   onHover,
   onEdit,
   onSwitchSegment,
 }: PlaneTableProps) {
-  const vars = VARS_BY_COUNT[n];
   const base = e * 16;
   const rows = Array.from({ length: 16 }, (_, i) => base + i);
 
@@ -129,7 +134,7 @@ function PlaneTable({
             >
               <span className={`${HDR} font-mono`}>code</span>
             </th>
-            {vars.map((v) => (
+            {names.map((v) => (
               <th
                 key={v}
                 scope="col"
@@ -243,6 +248,8 @@ export interface TruthTablePanelProps {
   cells: Record<SegKey, KMapCell[]>;
   segment: SegKey;
   vars: 4 | 5;
+  /** effective variable names (length = vars) for input columns + plane labels */
+  names: readonly string[];
   /** true once the active segment's E = 1 plane has been edited (5-var hint) */
   e1Dirty: boolean;
   /** minterm currently hovered/focused on the map or in this table (sync highlight) */
@@ -256,6 +263,7 @@ export default function TruthTablePanel({
   cells,
   segment,
   vars,
+  names,
   e1Dirty,
   hoverCode,
   onHover,
@@ -279,6 +287,7 @@ export default function TruthTablePanel({
             cells={cells}
             segment={segment}
             n={4}
+            names={names}
             hoverCode={hoverCode}
             onHover={onHover}
             onEdit={onEdit}
@@ -287,12 +296,13 @@ export default function TruthTablePanel({
         ) : (
           <>
             <div>
-              <p className="mb-1.5 font-mono text-xs font-semibold text-stone-600">E = 0</p>
+              <p className="mb-1.5 font-mono text-xs font-semibold text-stone-600">{names[0]} = 0</p>
               <PlaneTable
                 e={0}
                 cells={cells}
                 segment={segment}
                 n={5}
+                names={names}
                 hoverCode={hoverCode}
                 onHover={onHover}
                 onEdit={onEdit}
@@ -301,10 +311,10 @@ export default function TruthTablePanel({
             </div>
             <div>
               <p className="mb-1.5 font-mono text-xs font-semibold text-stone-600">
-                E = 1
+                {names[0]} = 1
                 {!e1Dirty && (
                   <span className="ml-2 font-sans font-normal text-stone-400">
-                    mirrors E = 0 until you edit it
+                    mirrors {names[0]} = 0 until you edit it
                   </span>
                 )}
               </p>
@@ -313,6 +323,7 @@ export default function TruthTablePanel({
                 cells={cells}
                 segment={segment}
                 n={5}
+                names={names}
                 hoverCode={hoverCode}
                 onHover={onHover}
                 onEdit={onEdit}
