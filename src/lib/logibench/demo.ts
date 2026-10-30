@@ -1,4 +1,5 @@
 import type { PartInstance, Project, Wire } from './types';
+import { boardDims } from './geometry';
 
 /**
  * Golden demo circuits (plan §6 milestone tests):
@@ -178,5 +179,114 @@ export function demo4511(): Project {
   p.parts = parts;
   p.wires = wires;
   p.notes = 'MVP golden circuit #2. The 555 module ticks at 1 Hz, the 7490 counts on falling edges (Q0→CP1 jumper makes it decade), the 4511 drives the common-cathode 5161AS. Note the 7490 power pins: 5 and 10! The 4511 is the HCT variant — TTL-threshold inputs (VIH 2.0 V) accept the 74LS90\'s VOH 2.7 V; plain HC (VIH 3.15 V) would be marginal.';
+  return p;
+}
+
+/**
+ * Demo 3 — two-board counter (multi-board acceptance fixture, plan §7.3):
+ * 555 + 7490 live on the "Counter" board, 4511 + 5161AS on the "Display"
+ * board. Long jumpers bridge + / − rail groups across the gap and carry the
+ * four Q outputs over. Both boards use full-plus grouped rails, so the rail
+ * bridges are part of the circuit (and the ERC keeps you honest about them).
+ *
+ * 7490 @ cols 13-19: e-row pins 1-7 = CP1 MR1 MR2 NC VCC MS1 MS2 (13..19),
+ * f-row pins 8-14 mirrored = Q2 Q1 GND Q3 Q0 NC CP0 (19..13).
+ * 4511 @ cols 5-12: e-row pins 1-8 = B C LT BI LE D A GND (5..12),
+ * f-row pins 9-16 mirrored = e d c b a g f VCC (12..5).
+ */
+export function demoTwoBoard(): Project {
+  const p = emptyProject('Lab 3 — two boards: 555 + 7490 → jumpers → 4511 + display');
+  uid = 2000;
+  const HB = (board: string, col: number, row: string) => ({ board, col, row: row as never });
+  const wireB = (board: string, from: [number, string], to: [number, string], color: string): Wire =>
+    ({ id: id('w'), from: HB(board, from[0], from[1]), to: HB(board, to[0], to[1]), color });
+  const cross = (from: [number, string], to: [number, string], color: string): Wire =>
+    ({ id: id('w'), from: HB('main', from[0], from[1]), to: HB('b2', to[0], to[1]), color });
+  const partB = (board: string, t: PartInstance['type'], pins: [number, string][], props: PartInstance['props'], defId?: string, family?: PartInstance['family']): PartInstance => ({
+    id: id(t), type: t, defId, ...(family ? { family } : {}), pins: pins.map(([c, r]) => HB(board, c, r)), props,
+  });
+
+  p.boards = [
+    { id: 'main', kind: 'full830', railLayout: 'groups5', label: 'Counter', x: 0, y: 0 },
+    { id: 'b2', kind: 'full830', railLayout: 'groups5', label: 'Display', x: boardDims('full830').width + 80, y: 0 },
+  ];
+
+  const parts: PartInstance[] = [];
+  const wires: Wire[] = [];
+
+  /* ---- board 1 (main): supply + clock + decade counter ---- */
+  parts.push(partB('main', 'supply', [[2, '+T'], [5, '-T']], { volts: 5 }));
+  // bridge the +T and −T groups so the whole left half shares power
+  wires.push(wireB('main', [6, '+T'], [9, '+T'], WIRE_COLORS.orange));
+  wires.push(wireB('main', [9, '-T'], [13, '-T'], WIRE_COLORS.orange));
+
+  parts.push(partB('main', 'clock555', [[8, 'e'], [9, 'e'], [10, 'e']], { freqHz: 1 }));
+  wires.push(wireB('main', [8, 'd'], [10, '+T'], WIRE_COLORS.red));
+  wires.push(wireB('main', [9, 'd'], [8, '-T'], WIRE_COLORS.black));
+  wires.push(wireB('main', [10, 'd'], [13, 'g'], WIRE_COLORS.amber)); // OUT → CP0
+
+  // 7490 (DIP14) at cols 13..19 — POWER IS PINS 5 & 10
+  parts.push(partB('main', 'chip',
+    [[13, 'e'], [14, 'e'], [15, 'e'], [16, 'e'], [17, 'e'], [18, 'e'], [19, 'e'],
+     [19, 'f'], [18, 'f'], [17, 'f'], [16, 'f'], [15, 'f'], [14, 'f'], [13, 'f']], {}, '7490'));
+  wires.push(wireB('main', [17, 'd'], [13, '+T'], WIRE_COLORS.red));   // VCC = pin 5 (e17)
+  wires.push(wireB('main', [17, 'g'], [12, '-T'], WIRE_COLORS.black)); // GND = pin 10 (f17)
+  wires.push(wireB('main', [14, 'd'], [6, '-T'], WIRE_COLORS.black));  // MR1 low
+  wires.push(wireB('main', [15, 'd'], [7, '-T'], WIRE_COLORS.black));  // MR2 low
+  wires.push(wireB('main', [18, 'd'], [15, '-T'], WIRE_COLORS.black)); // MS1 low
+  wires.push(wireB('main', [19, 'd'], [14, '-T'], WIRE_COLORS.black)); // MS2 low
+  wires.push(wireB('main', [15, 'g'], [13, 'd'], WIRE_COLORS.green));  // Q0 (f15) → CP1 (e13)
+
+  /* ---- cross-board jumpers: power + BCD data ---- */
+  wires.push(cross([4, '+T'], [3, '+T'], WIRE_COLORS.red));   // + rail bridge
+  wires.push(cross([16, '-T'], [6, '-T'], WIRE_COLORS.black)); // − rail bridge (from the bridged group)
+  wires.push(cross([15, 'h'], [11, 'd'], WIRE_COLORS.teal));  // Q0 (f15) → A (e11)
+  wires.push(cross([18, 'g'], [5, 'd'], WIRE_COLORS.teal));   // Q1 (f18) → B (e5)
+  wires.push(cross([19, 'g'], [6, 'd'], WIRE_COLORS.teal));   // Q2 (f19) → C (e6)
+  wires.push(cross([16, 'g'], [10, 'd'], WIRE_COLORS.teal));  // Q3 (f16) → D (e10)
+
+  /* ---- board 2 (b2): decoder + display ---- */
+  // bridge b2's rail groups too — it is powered only through the jumpers
+  wires.push(wireB('b2', [6, '+T'], [9, '+T'], WIRE_COLORS.orange));
+  wires.push(wireB('b2', [9, '-T'], [13, '-T'], WIRE_COLORS.orange));
+
+  // 4511 (DIP16) HCT at cols 5..12
+  parts.push(partB('b2', 'chip',
+    [[5, 'e'], [6, 'e'], [7, 'e'], [8, 'e'], [9, 'e'], [10, 'e'], [11, 'e'], [12, 'e'],
+     [12, 'f'], [11, 'f'], [10, 'f'], [9, 'f'], [8, 'f'], [7, 'f'], [6, 'f'], [5, 'f']], {}, '4511', 'HCT'));
+  wires.push(wireB('b2', [5, 'h'], [4, '+T'], WIRE_COLORS.red));    // VCC pin 16 (f5)
+  wires.push(wireB('b2', [12, 'd'], [7, '-T'], WIRE_COLORS.black)); // GND pin 8 (e12)
+  wires.push(wireB('b2', [7, 'd'], [10, '+T'], WIRE_COLORS.red));   // LT̅ high
+  wires.push(wireB('b2', [8, 'd'], [11, '+T'], WIRE_COLORS.red));   // BI̅ high
+  wires.push(wireB('b2', [9, 'd'], [12, '-T'], WIRE_COLORS.black)); // LE low
+
+  // 5161AS (CC) at cols 16..20
+  parts.push(partB('b2', 'seg7',
+    [[16, 'e'], [17, 'e'], [18, 'e'], [19, 'e'], [20, 'e'],
+     [20, 'f'], [19, 'f'], [18, 'f'], [17, 'f'], [16, 'f']], { polarity: 'CC', color: 'red' }));
+  wires.push(wireB('b2', [18, 'd'], [14, '-T'], WIRE_COLORS.black)); // common cathode 3
+  wires.push(wireB('b2', [18, 'g'], [16, '-T'], WIRE_COLORS.black)); // common cathode 8
+
+  // one 330 Ω per segment (into the same strips as the pins)
+  // 4511 segment pins: a=f8 b=f9 c=f10 d=f11 e=f12 f=f6 g=f7
+  const segs3: [number, string, number, string][] = [
+    [8, 'g', 19, 'j'],  // a → display a (f19)
+    [9, 'g', 20, 'j'],  // b → display b (f20)
+    [10, 'g', 19, 'a'], // c → display c (e19)
+    [11, 'g', 17, 'a'], // d → display d (e17)
+    [12, 'g', 16, 'a'], // e → display e (e16)
+    [6, 'g', 17, 'j'],  // f → display f (f17)
+    [7, 'g', 16, 'j'],  // g → display g (f16)
+  ];
+  for (const [c1, r1, c2, r2] of segs3) {
+    parts.push(partB('b2', 'resistor', [[c1, r1], [c2, r2]], { ohms: 330 }));
+  }
+
+  // 0.1 µF decoupling on the decoder (VCC strip ↔ GND strip)
+  parts.push(partB('b2', 'cap', [[5, 'g'], [12, 'b']], { farads: 1e-7 }));
+
+  p.parts = parts;
+  p.wires = wires;
+  p.notes = 'MVP golden circuit #3 — TWO boards. The 555 ticks at 1 Hz and the 7490 counts on the "Counter" board; the Q outputs ride long teal jumpers to the 4511 + 5161AS on the "Display" board. Both boards use grouped (full-plus) rails: the orange jumpers BRIDGE rail groups, and the red/black jumpers carry power across the gap. Remove a bridge and watch ERC catch the dead rail section.';
   return p;
 }

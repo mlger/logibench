@@ -6,7 +6,11 @@ import { partLabel } from '@/lib/logibench/geometry';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Trash2, Info } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { Trash2, Info, Copy } from 'lucide-react';
 import { nearestESeries, formatOhms } from '@/lib/logibench/eseries';
 
 const SECTION = 'text-xs font-semibold uppercase tracking-wider text-stone-500';
@@ -22,8 +26,9 @@ export default function Inspector() {
 
   const part = selection?.kind === 'part' ? project.parts.find((p) => p.id === selection.id) : undefined;
   const wire = selection?.kind === 'wire' ? project.wires.find((w) => w.id === selection.id) : undefined;
+  const board = selection?.kind === 'board' ? project.boards.find((b) => b.id === selection.id) : undefined;
 
-  if (!part && !wire) {
+  if (!part && !wire && !board) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <Info className="h-6 w-6 text-stone-300" />
@@ -32,6 +37,96 @@ export default function Inspector() {
           Hover a hole to highlight its net.<br />
           {mode === 'simulate' ? 'Interact mode: click switches and hold buttons.' : 'Use Interact mode to drive the live circuit.'}
         </p>
+      </div>
+    );
+  }
+
+  if (board) {
+    const affected = project.parts.filter((pt) => pt.pins.some((h) => h.board === board.id)).length
+      + project.wires.filter((w) => w.from.board === board.id || w.to.board === board.id).length;
+    return (
+      <div className="space-y-4 p-4">
+        <h3 className={SECTION}>Breadboard</h3>
+        <div>
+          <Label className="text-[11px] text-stone-500" htmlFor="board-label">Label</Label>
+          <Input
+            id="board-label"
+            className="mt-1.5 h-8 text-xs"
+            value={board.label ?? board.id}
+            maxLength={24}
+            onChange={(e) => useEditor.getState().renameBoard(board.id, e.target.value)}
+          />
+        </div>
+        <div>
+          <Label className="text-[11px] text-stone-500">Size</Label>
+          <div className="mt-1.5 grid grid-cols-2 gap-1">
+            {([
+              ['half400', 'Half · 400 pt'],
+              ['full830', 'Full-plus · 830 pt'],
+            ] as const).map(([kind, label]) => (
+              <button
+                key={kind} type="button"
+                onClick={() => useEditor.getState().setBoardKind(board.id, kind)}
+                aria-pressed={board.kind === kind}
+                className={`rounded-md border px-2 py-1.5 text-[10px] font-medium ${board.kind === kind ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <Label className="text-[11px] text-stone-500">Rail layout</Label>
+          <div className="mt-1.5 grid grid-cols-3 gap-1">
+            {([
+              ['continuous', 'Solid'],
+              ['center-split', 'Split'],
+              ['groups5', 'Groups'],
+            ] as const).map(([layout, label]) => (
+              <button
+                key={layout} type="button"
+                onClick={() => useEditor.getState().setRailLayout(board.id, layout)}
+                aria-pressed={board.railLayout === layout}
+                title={layout === 'groups5' ? 'Full-plus style: independent 5-hole groups (classic trap!)' : layout === 'center-split' ? 'Rails broken once in the middle' : 'Each rail line is one net'}
+                className={`rounded-md border px-1 py-1.5 text-[10px] font-medium ${board.railLayout === layout ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {board.railLayout === 'groups5' && (
+            <p className="mt-1.5 text-[10px] leading-snug text-stone-500">Rails are broken into 5-hole groups — bridge them with jumpers or power each group.</p>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Button variant="outline" size="sm" onClick={() => useEditor.getState().duplicateBoard(board.id)} disabled={project.boards.length >= 6}>
+            <Copy className="h-3.5 w-3.5" /> Duplicate
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm" disabled={project.boards.length <= 1}>
+                <Trash2 className="h-3.5 w-3.5" /> Remove
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove “{board.label ?? board.id}”?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This deletes the board together with {affected} part{affected === 1 ? '' : 's'} / wire{affected === 1 ? '' : 's'} placed on it. You can undo.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Keep board</AlertDialogCancel>
+                <AlertDialogAction onClick={() => useEditor.getState().removeBoard(board.id)}>
+                  Remove board
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+        {project.boards.length >= 6 && (
+          <p className="text-[10px] text-stone-400">Board limit (6) reached — remove one to add another.</p>
+        )}
       </div>
     );
   }

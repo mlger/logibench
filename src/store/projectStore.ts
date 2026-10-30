@@ -5,16 +5,18 @@ import type {
   HoleRef, PartInstance, PartType, Project, SimResult, Wire,
 } from '@/lib/logibench/types';
 import {
-  ALL_ROWS, BOARD_SPECS, checkPlacement, holeExists, holeKey, pinCount, sameHole,
+  ALL_ROWS, BOARD_SPECS, boardDims, checkPlacement, holeExists, holeKey, pinCount, sameHole,
 } from '@/lib/logibench/geometry';
 import { buildNetlist } from '@/lib/logibench/netlist';
 import { Simulator } from '@/lib/logibench/sim';
 import { migrateProject } from '@/lib/logibench/migrate';
-import { emptyProject, demo7447, demo4511 } from '@/lib/logibench/demo';
+import { emptyProject, demo7447, demo4511, demoTwoBoard } from '@/lib/logibench/demo';
 import type { RailLayout } from '@/lib/logibench/types';
 
-export type Selection = { kind: 'part' | 'wire'; id: string } | null;
+export type Selection = { kind: 'part' | 'wire' | 'board'; id: string } | null;
 export type Mode = 'select' | 'wire' | 'simulate';
+
+export const MAX_BOARDS = 6;
 
 export interface PlacementState {
   type: PartType;
@@ -77,12 +79,17 @@ export interface EditorState {
   stepSim: (dtMs: number) => void;
   resetCounters: () => void;
 
-  loadDemo: (which: 1 | 2) => void;
+  loadDemo: (which: 1 | 2 | 3) => void;
   clearAll: () => void;
   loadProject: (p: unknown) => void;
   setSavedId: (id: string | null) => void;
-  setBoardKind: (kind: 'half400' | 'full830') => void;
-  setRailLayout: (layout: RailLayout) => void;
+  addBoard: (kind: 'half400' | 'full830') => void;
+  removeBoard: (id: string) => void;
+  duplicateBoard: (id: string) => void;
+  renameBoard: (id: string, label: string) => void;
+  moveBoard: (id: string, x: number, y: number) => void;
+  setBoardKind: (id: string, kind: 'half400' | 'full830') => void;
+  setRailLayout: (id: string, layout: RailLayout) => void;
 }
 
 let simulator: Simulator | null = null;
@@ -257,6 +264,10 @@ export const useEditor = create<EditorState>((set, get) => ({
   deleteSelection: () => {
     const { selection } = get();
     if (!selection) return;
+    if (selection.kind === 'board') {
+      get().removeBoard(selection.id);
+      return;
+    }
     get().commit((p) => {
       if (selection.kind === 'part') p.parts = p.parts.filter((x) => x.id !== selection.id);
       else p.wires = p.wires.filter((x) => x.id !== selection.id);
@@ -373,7 +384,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   loadDemo: (which) => {
-    const p = which === 1 ? demo7447() : demo4511();
+    const p = which === 1 ? demo7447() : which === 2 ? demo4511() : demoTwoBoard();
     simulator = null;
     set({
       project: p, past: [], future: [], selection: null, placement: null,
@@ -403,15 +414,104 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   setSavedId: (id) => set({ projectId: id }),
 
-  setBoardKind: (kind) => {
+  addBoard: (kind) => {
+    const st = get();
+    if (st.project.boards.length >= MAX_BOARDS) {
+      st.setFlash(`Board limit reached (${MAX_BOARDS}).`);
+      return;
+    }
     get().commit((p) => {
-      p.boards = [{ ...p.boards[0], kind }];
+      const n = p.boards.length;
+      let id = `b${n + 1}`;
+      while (p.boards.some((b) => b.id === id)) id = `b${n + 1}-${Math.random().toString(36).slice(2, 5)}`;
+      const last = p.boards[n - 1];
+      const dims = boardDims(last?.kind ?? 'half400');
+      p.boards.push({
+        id,
+        kind,
+        railLayout: kind === 'full830' ? 'groups5' : 'continuous',
+        label: `Board ${n + 1}`,
+        x: (last?.x ?? 0) + dims.width + 80,
+        y: last?.y ?? 0,
+      });
+    });
+    set({ selection: null });
+  },
+
+  removeBoard: (id) => {
+    const st = get();
+    if (st.project.boards.length <= 1) {
+      st.setFlash('The project needs at least one board.');
+      return;
+    }
+    get().commit((p) => {
+      p.boards = p.boards.filter((b) => b.id !== id);
+      p.parts = p.parts.filter((pt) => pt.pins.every((h) => h.board !== id));
+      p.wires = p.wires.filter((w) => w.from.board !== id && w.to.board !== id);
+    });
+    set({ selection: null });
+  },
+
+  duplicateBoard: (id) => {
+    const st = get();
+    if (st.project.boards.length >= MAX_BOARDS) {
+      st.setFlash(`Board limit reached (${MAX_BOARDS}).`);
+      return;
+    }
+    get().commit((p) => {
+      const src = p.boards.find((b) => b.id === id);
+      if (!src) return;
+      let nid = `${src.id}-copy`;
+      while (p.boards.some((b) => b.id === nid)) nid = `${src.id}-${Math.random().toString(36).slice(2, 5)}`;
+      const dims = boardDims(src.kind);
+      p.boards.push({
+        ...src,
+        id: nid,
+        label: `${src.label ?? src.id} copy`,
+        x: (src.x ?? 0) + dims.width + 80,
+      });
+      for (const part of p.parts) {
+        if (part.pins.every((h) => h.board === id)) {
+          p.parts.push({
+            ...JSON.parse(JSON.stringify(part)),
+            id: nextId(part.type),
+            pins: part.pins.map((h) => ({ ...h, board: nid })),
+          });
+        }
+      }
+      for (const w of p.wires) {
+        if (w.from.board === id && w.to.board === id) {
+          p.wires.push({ ...w, id: nextId('w'), from: { ...w.from, board: nid }, to: { ...w.to, board: nid } });
+        }
+      }
     });
   },
 
-  setRailLayout: (layout) => {
+  renameBoard: (id, label) => {
     get().commit((p) => {
-      p.boards = [{ ...p.boards[0], railLayout: layout }];
+      const b = p.boards.find((x) => x.id === id);
+      if (b) b.label = label.trim().slice(0, 24) || undefined;
+    });
+  },
+
+  moveBoard: (id, x, y) => {
+    get().commit((p) => {
+      const b = p.boards.find((x2) => x2.id === id);
+      if (b) { b.x = x; b.y = y; }
+    });
+  },
+
+  setBoardKind: (id, kind) => {
+    get().commit((p) => {
+      const b = p.boards.find((x) => x.id === id);
+      if (b) b.kind = kind;
+    });
+  },
+
+  setRailLayout: (id, layout) => {
+    get().commit((p) => {
+      const b = p.boards.find((x) => x.id === id);
+      if (b) b.railLayout = layout;
     });
   },
 }));

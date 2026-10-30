@@ -1,10 +1,10 @@
 'use client';
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { HoleRef, PartInstance, Project, SimResult } from '@/lib/logibench/types';
+import type { Breadboard, HoleRef, PartInstance, Project, SimResult } from '@/lib/logibench/types';
 import {
   BOARD_SPECS, PITCH, boardDims, colX, chipPackage, checkPlacement, holeExists, holeKey,
-  nearestHole, occupiedHoles, parseHoleKey, partLabel, railGroups, rowY, sameHole, wireArc,
+  nearestHoleOnBoards, occupiedHoles, parseHoleKey, partLabel, railGroups, rowY, sameHole, wireArc,
 } from '@/lib/logibench/geometry';
 import { netHolesOf, useEditor } from '@/store/projectStore';
 import { useDnd } from '@/store/dnd';
@@ -19,6 +19,7 @@ export interface CanvasCallbacks {
   onHoleHover: (hole: HoleRef | null) => void;
   onPartClick: (id: string) => void;
   onWireClick: (id: string) => void;
+  onBoardClick: (id: string) => void;
   onBackground: () => void;
   onSwitchToggle: (id: string) => void;
   onButtonPress: (id: string, closed: boolean) => void;
@@ -56,8 +57,7 @@ export default function BreadboardCanvas(props: Props) {
 
 function CanvasInner(props: Props & { initialScale: number }) {
   const { project, simResult, selection, placement, wireStart, running, liveSwitches } = props;
-  const board = project.boards[0];
-  const dims = boardDims(board.kind);
+  const boards = project.boards;
   const [view, setView] = useState({ x: 0, y: 0, scale: props.initialScale });
   const svgRefInt = useRef<SVGSVGElement | null>(null);
   const svgRef = props.svgRef ?? svgRefInt;
@@ -117,7 +117,7 @@ function CanvasInner(props: Props & { initialScale: number }) {
       if (!svg) return null;
       const rect = svg.getBoundingClientRect();
       const v = viewRef.current;
-      return nearestHole(board.kind, board.railLayout, (cx - rect.left - v.x) / v.scale, (cy - rect.top - v.y) / v.scale, board.id);
+      return nearestHoleOnBoards(useEditor.getState().project.boards, (cx - rect.left - v.x) / v.scale, (cy - rect.top - v.y) / v.scale);
     };
     const trashHit = (cx: number, cy: number) => {
       const el = trashRef.current;
@@ -180,7 +180,7 @@ function CanvasInner(props: Props & { initialScale: number }) {
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
     };
-  }, [dndPayload !== null, board.kind, board.id]);
+  }, [dndPayload !== null]);
 
   // a wire drag re-targets wireStart to its origin hole; remember the mode to restore on drop
   useEffect(() => {
@@ -190,18 +190,21 @@ function CanvasInner(props: Props & { initialScale: number }) {
     }
   }, [dndPayload]);
 
-  const cols = BOARD_SPECS[board.kind].cols;
-
   const holePositions = useMemo(() => {
     const rows = ['+T', '-T', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', '+B', '-B'] as const;
     const map = new Map<string, { x: number; y: number }>();
-    for (let col = 1; col <= cols; col++) {
-      for (const row of rows) {
-        map.set(holeKey({ board: board.id, col, row }), { x: colX(board.kind, col), y: rowY(board.kind, row) });
+    for (const b of boards) {
+      const bx = b.x ?? 0;
+      const by = b.y ?? 0;
+      const cols = BOARD_SPECS[b.kind].cols;
+      for (let col = 1; col <= cols; col++) {
+        for (const row of rows) {
+          map.set(holeKey({ board: b.id, col, row }), { x: bx + colX(b.kind, col), y: by + rowY(b.kind, row) });
+        }
       }
     }
     return map;
-  }, [board.id, board.kind, cols]);
+  }, [boards]);
 
   const pos = useCallback(
     (h: HoleRef) => holePositions.get(holeKey(h)) ?? { x: 0, y: 0 },
@@ -275,20 +278,211 @@ function CanvasInner(props: Props & { initialScale: number }) {
     const defId = isDnd ? dndPayload.defId : placement?.defId;
     const hk = isDnd ? dndHoverKey : hoverKey;
     if (!type || !hk) return null;
-    const col = Number(hk.split(':')[1]);
+    const seg = hk.split(':');
+    const boardId = seg[0];
+    const gb = boards.find((b) => b.id === boardId) ?? boards[0];
+    const col = Number(seg[1]);
     if (Number.isNaN(col)) return null;
     if (type === 'chip' || type === 'seg7') {
       const partsForCheck = isDnd && dndPayload.source === 'board' && dndPayload.partId
         ? project.parts.filter((p) => p.id !== dndPayload.partId)
         : project.parts;
-      const check = checkPlacement(board.kind, partsForCheck, type, defId, col, board.id);
+      const check = checkPlacement(gb.kind, partsForCheck, type, defId, col, gb.id);
       const pkg = type === 'chip' ? chipPackage(defId ?? '7400') : null;
-      return { kind: 'multi' as const, col, ok: check.ok, spans: type === 'seg7' ? 5 : pkg === 'DIP16' ? 8 : pkg === 'DIP14' ? 7 : 4 };
+      return { kind: 'multi' as const, boardId, col, ok: check.ok, spans: type === 'seg7' ? 5 : pkg === 'DIP16' ? 8 : pkg === 'DIP14' ? 7 : 4 };
     }
-    return { kind: 'two' as const, col, ok: true, spans: 1 };
-  }, [placement, hoverKey, dndPayload, dndHoverKey, board.kind, board.id, project.parts]);
+    return { kind: 'two' as const, boardId, col, ok: true, spans: 1 };
+  }, [placement, hoverKey, dndPayload, dndHoverKey, boards, project.parts]);
 
   const rows = ['+T', '-T', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', '+B', '-B'] as const;
+
+  /* ---------- board drag (header grip only) + zoom-to-fit ---------- */
+  const [dragBoard, setDragBoard] = useState<{ id: string; x: number; y: number } | null>(null);
+  const beginBoardDrag = useCallback((b: Breadboard, e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const ox = b.x ?? 0;
+    const oy = b.y ?? 0;
+    let moved = false;
+    const snap = (n: number) => Math.round(n / 20) * 20;
+    const onMove = (ev: PointerEvent) => {
+      const v = viewRef.current;
+      if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
+      moved = true;
+      setDragBoard({ id: b.id, x: snap(ox + (ev.clientX - sx) / v.scale), y: snap(oy + (ev.clientY - sy) / v.scale) });
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setDragBoard((db) => {
+        if (db && moved) useEditor.getState().moveBoard(db.id, db.x, db.y);
+        return null;
+      });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, []);
+
+  const fitAll = () => {
+    const svg = svgRef.current;
+    if (!svg || boards.length === 0) return;
+    const r = svg.getBoundingClientRect();
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const b of boards) {
+      const d = boardDims(b.kind);
+      const bx = b.x ?? 0;
+      const by = b.y ?? 0;
+      minX = Math.min(minX, bx);
+      minY = Math.min(minY, by - 24);
+      maxX = Math.max(maxX, bx + d.width);
+      maxY = Math.max(maxY, by + d.height);
+    }
+    const pad = 28;
+    const w = Math.max(1, maxX - minX);
+    const h = Math.max(1, maxY - minY);
+    const scale = Math.min(2.5, Math.max(0.3, Math.min((r.width - pad * 2) / w, (r.height - pad * 2) / h)));
+    setView({ scale, x: (r.width - w * scale) / 2 - minX * scale, y: (r.height - h * scale) / 2 - minY * scale });
+  };
+
+  const selectedBoardId = selection?.kind === 'board' ? selection.id : null;
+
+  const renderBoardArt = (b: Breadboard) => {
+    const dragging = dragBoard?.id === b.id;
+    const bx = dragging ? dragBoard!.x : (b.x ?? 0);
+    const by = dragging ? dragBoard!.y : (b.y ?? 0);
+    const dims = boardDims(b.kind);
+    const cols = BOARD_SPECS[b.kind].cols;
+    const sel = selectedBoardId === b.id;
+    return (
+      <g key={b.id} transform={`translate(${bx},${by})`}>
+        {/* board header — drag grip + label */}
+        <g
+          data-testid={`board-header-${b.id}`}
+          style={{ cursor: 'grab' }}
+          onPointerDown={(e) => beginBoardDrag(b, e)}
+          onClick={(e) => { e.stopPropagation(); props.onBoardClick(b.id); }}
+        >
+          <rect x={4} y={-21} width={dims.width - 6} height={17} rx={5} fill={sel ? '#44403c' : '#78716c'} opacity={0.94} />
+          <circle cx={15} cy={-12.5} r={2} fill="#d6d3d1" />
+          <circle cx={21} cy={-12.5} r={2} fill="#d6d3d1" />
+          <text x={29} y={-9} fontSize={9.5} fontWeight={700} fill="#fafaf9" fontFamily="ui-monospace, monospace">{b.label ?? b.id}</text>
+          <text x={dims.width - 14} y={-9} textAnchor="end" fontSize={8} fill="#e7e5e4">{b.kind === 'full830' ? '830 pt' : '400 pt'}</text>
+          <title>Drag to move the board — click to select it</title>
+        </g>
+        {/* base */}
+        <rect x={6} y={4} width={dims.width - 4} height={dims.height - 8} rx={10} fill={BOARD_BG} stroke={sel ? '#d97706' : '#d6d3d1'} strokeWidth={sel ? 2.5 : 2} />
+        {/* rail art — per-group tint + silk lines (red = +, blue = −), like the full-plus reference photo */}
+        {(['+T', '-T', '+B', '-B'] as const).map((row) => {
+          const line = row === '+T' || row === '+B' ? 0 : 1;
+          const groups = railGroups(b.kind, b.railLayout, line);
+          const y = rowY(b.kind, row);
+          const isPlus = row === '+T' || row === '+B';
+          const silkColor = isPlus ? '#dc2626' : '#2563eb';
+          const silkY = isPlus ? y - 8 : y + 8;
+          return (
+            <g key={row}>
+              {groups.map((g, gi) => (
+                <rect
+                  key={gi} x={colX(b.kind, g.start) - 7} y={y - 7}
+                  width={(g.end - g.start) * PITCH + 6} height={PITCH - 2} rx={4}
+                  fill={isPlus ? '#fee2e2' : '#dbeafe'} opacity={0.5}
+                />
+              ))}
+              {groups.map((g, gi) => (
+                <line
+                  key={`s${gi}`} x1={colX(b.kind, g.start) - 9} y1={silkY}
+                  x2={colX(b.kind, g.end) + 9} y2={silkY}
+                  stroke={silkColor} strokeWidth={1.6} strokeLinecap="round" opacity={0.85}
+                />
+              ))}
+            </g>
+          );
+        })}
+        {/* channel shadow */}
+        <rect
+          x={dims.padX - 10}
+          y={rowY(b.kind, 'e') + PITCH / 2 + 2}
+          width={cols * PITCH + 12}
+          height={rowY(b.kind, 'f') - rowY(b.kind, 'e') - PITCH - 2}
+          fill="#0c0a09"
+          opacity={0.07}
+        />
+        {/* column numbers — above the top rail and in the channel */}
+        {Array.from({ length: cols }, (_, ci) => {
+          const col = ci + 1;
+          if (col % 5 !== 0) return null;
+          const yChannel = (rowY(b.kind, 'e') + rowY(b.kind, 'f')) / 2 + 3;
+          return (
+            <g key={col}>
+              <text x={colX(b.kind, col)} y={dims.yPlusT - 11} textAnchor="middle" fontSize={8} fill="#78716c" fontFamily="ui-monospace, monospace">{col}</text>
+              <text x={colX(b.kind, col)} y={yChannel} textAnchor="middle" fontSize={8} fill="#a8a29e" fontFamily="ui-monospace, monospace">{col}</text>
+            </g>
+          );
+        })}
+        {/* row letters on both edges */}
+        {(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'] as const).map((row) => {
+          const y = rowY(b.kind, row) + 3;
+          return (
+            <g key={row}>
+              <text x={dims.padX - 14} y={y} textAnchor="middle" fontSize={8} fill="#78716c" fontFamily="ui-monospace, monospace">{row.toUpperCase()}</text>
+              <text x={dims.padX + cols * PITCH + 8} y={y} textAnchor="middle" fontSize={8} fill="#78716c" fontFamily="ui-monospace, monospace">{row.toUpperCase()}</text>
+            </g>
+          );
+        })}
+      </g>
+    );
+  };
+
+  const renderBoardHoles = (b: Breadboard) => {
+    const bx = dragBoard?.id === b.id ? dragBoard!.x : (b.x ?? 0);
+    const by = dragBoard?.id === b.id ? dragBoard!.y : (b.y ?? 0);
+    const cols = BOARD_SPECS[b.kind].cols;
+    return (
+      <g key={b.id} transform={`translate(${bx},${by})`}>
+        {rows.map((row) =>
+          Array.from({ length: cols }, (_, ci) => {
+            const col = ci + 1;
+            // groups5 rail gaps are bare plastic — no hole there
+            if (!holeExists(b.kind, b.railLayout, row, col)) return null;
+            const key = `${b.id}:${col}:${row}`;
+            const p = { x: colX(b.kind, col), y: rowY(b.kind, row) };
+            const level = holeLevel(key);
+            const inNet = netHoles?.has(key);
+            const levelColor = level !== undefined ? LEVEL_COLORS[level] : undefined;
+            const isWireStart = wireStart && holeKey(wireStart) === key;
+            return (
+              <g key={key}>
+                {inNet && <circle cx={p.x} cy={p.y} r={7} fill="#fbbf24" opacity={0.5} />}
+                <rect
+                  x={p.x - 3.4} y={p.y - 3.4} width={6.8} height={6.8} rx={1.4}
+                  fill={levelColor && levelColor !== 'transparent' ? levelColor : HOLE_FILL}
+                  stroke={level === 'conflict' ? '#b45309' : HOLE_STROKE}
+                  strokeWidth={level === 'conflict' ? 1.6 : 0.7}
+                />
+                <rect
+                  x={p.x - 7} y={p.y - 7} width={14} height={14} fill="transparent"
+                  style={{ cursor: 'pointer' }}
+                  onPointerDown={(e) => {
+                    // pressing an exposed hole can become a drag-to-wire gesture
+                    if (running) return;
+                    if (e.pointerType === 'mouse' && e.button !== 0) return;
+                    e.stopPropagation(); // don't pan the board
+                    beginDragTracking({ kind: 'wire', hole: { board: b.id, col, row }, label: 'wire' }, e);
+                  }}
+                  onClick={(e) => handleHoleClick({ board: b.id, col, row }, e)}
+                  onMouseEnter={() => handleHoleEnter({ board: b.id, col, row })}
+                  onMouseLeave={handleHoleLeave}
+                />
+                {isWireStart && <circle cx={p.x} cy={p.y} r={9} fill="none" stroke="#d97706" strokeWidth={2} className="animate-pulse" />}
+              </g>
+            );
+          }),
+        )}
+      </g>
+    );
+  };
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl border border-stone-200 bg-stone-100">
@@ -307,46 +501,10 @@ function CanvasInner(props: Props & { initialScale: number }) {
         aria-label="Breadboard canvas"
       >
         <g transform={`translate(${view.x},${view.y}) scale(${view.scale})`}>
-          {/* board base */}
-          <rect x={6} y={4} width={dims.width - 4} height={dims.height - 8} rx={10} fill={BOARD_BG} stroke="#d6d3d1" strokeWidth={2} />
-          {/* rail art — per-group tint + silk lines (red = +, blue = −), like the full-plus reference photo */}
-          {(['+T', '-T', '+B', '-B'] as const).map((row) => {
-            const line = row === '+T' || row === '+B' ? 0 : 1;
-            const groups = railGroups(board.kind, board.railLayout, line);
-            const y = rowY(board.kind, row);
-            const isPlus = row === '+T' || row === '+B';
-            const silkColor = isPlus ? '#dc2626' : '#2563eb';
-            const silkY = (row === '+T' || row === '+B') ? y - 8 : y + 8;
-            return (
-              <g key={row}>
-                {groups.map((g, gi) => (
-                  <rect
-                    key={gi} x={colX(board.kind, g.start) - 7} y={y - 7}
-                    width={(g.end - g.start) * PITCH + 6} height={PITCH - 2} rx={4}
-                    fill={isPlus ? '#fee2e2' : '#dbeafe'} opacity={0.5}
-                  />
-                ))}
-                {groups.map((g, gi) => (
-                  <line
-                    key={`s${gi}`} x1={colX(board.kind, g.start) - 9} y1={silkY}
-                    x2={colX(board.kind, g.end) + 9} y2={silkY}
-                    stroke={silkColor} strokeWidth={1.6} strokeLinecap="round" opacity={0.85}
-                  />
-                ))}
-              </g>
-            );
-          })}
-          {/* channel shadow */}
-          <rect
-            x={dims.padX - 10}
-            y={rowY(board.kind, 'e') + PITCH / 2 + 2}
-            width={cols * PITCH + 12}
-            height={rowY(board.kind, 'f') - rowY(board.kind, 'e') - PITCH - 2}
-            fill="#0c0a09"
-            opacity={0.07}
-          />
+          {/* board art — one group per board */}
+          {boards.map((b) => renderBoardArt(b))}
 
-          {/* jumper wires — arced over the board, under the hole hit areas */}
+          {/* jumper wires — arced over the boards, under the hole hit areas */}
           {project.wires.map((w) => {
             const a = pos(w.from);
             const b = pos(w.to);
@@ -399,73 +557,13 @@ function CanvasInner(props: Props & { initialScale: number }) {
             <WireDragLayer svgRef={svgRef} view={view} origin={wireDrag.hole} pos={pos} color={wireColor} />
           )}
 
-          {/* holes */}
-          {rows.map((row) =>
-            Array.from({ length: cols }, (_, ci) => {
-              const col = ci + 1;
-              // groups5 rail gaps are bare plastic — no hole there
-              if (!holeExists(board.kind, board.railLayout, row, col)) return null;
-              const key = `${board.id}:${col}:${row}`;
-              const p = { x: colX(board.kind, col), y: rowY(board.kind, row) };
-              const level = holeLevel(key);
-              const inNet = netHoles?.has(key);
-              const levelColor = level !== undefined ? LEVEL_COLORS[level] : undefined;
-              const isWireStart = wireStart && holeKey(wireStart) === key;
-              return (
-                <g key={key}>
-                  {inNet && <circle cx={p.x} cy={p.y} r={7} fill="#fbbf24" opacity={0.5} />}
-                  <rect
-                    x={p.x - 3.4} y={p.y - 3.4} width={6.8} height={6.8} rx={1.4}
-                    fill={levelColor && levelColor !== 'transparent' ? levelColor : HOLE_FILL}
-                    stroke={level === 'conflict' ? '#b45309' : HOLE_STROKE}
-                    strokeWidth={level === 'conflict' ? 1.6 : 0.7}
-                  />
-                  <rect
-                    x={p.x - 7} y={p.y - 7} width={14} height={14} fill="transparent"
-                    style={{ cursor: 'pointer' }}
-                    onPointerDown={(e) => {
-                      // pressing an exposed hole can become a drag-to-wire gesture
-                      if (running) return;
-                      if (e.pointerType === 'mouse' && e.button !== 0) return;
-                      e.stopPropagation(); // don't pan the board
-                      beginDragTracking({ kind: 'wire', hole: { board: board.id, col, row }, label: 'wire' }, e);
-                    }}
-                    onClick={(e) => handleHoleClick({ board: board.id, col, row }, e)}
-                    onMouseEnter={() => handleHoleEnter({ board: board.id, col, row })}
-                    onMouseLeave={handleHoleLeave}
-                  />
-                  {isWireStart && <circle cx={p.x} cy={p.y} r={9} fill="none" stroke="#d97706" strokeWidth={2} className="animate-pulse" />}
-                </g>
-              );
-            }),
-          )}
-
-          {/* column numbers — above the top rail and in the channel, like the reference */}
-          {Array.from({ length: cols }, (_, ci) => {
-            const col = ci + 1;
-            if (col % 5 !== 0) return null;
-            const yChannel = (rowY(board.kind, 'e') + rowY(board.kind, 'f')) / 2 + 3;
-            return (
-              <g key={col}>
-                <text x={colX(board.kind, col)} y={dims.yPlusT - 11} textAnchor="middle" fontSize={8} fill="#78716c" fontFamily="ui-monospace, monospace">{col}</text>
-                <text x={colX(board.kind, col)} y={yChannel} textAnchor="middle" fontSize={8} fill="#a8a29e" fontFamily="ui-monospace, monospace">{col}</text>
-              </g>
-            );
-          })}
-
-          {/* row letters on both edges (strip rows) */}
-          {(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'] as const).map((row) => {
-            const y = rowY(board.kind, row) + 3;
-            return (
-              <g key={row}>
-                <text x={dims.padX - 14} y={y} textAnchor="middle" fontSize={8} fill="#78716c" fontFamily="ui-monospace, monospace">{row.toUpperCase()}</text>
-                <text x={dims.padX + cols * PITCH + 8} y={y} textAnchor="middle" fontSize={8} fill="#78716c" fontFamily="ui-monospace, monospace">{row.toUpperCase()}</text>
-              </g>
-            );
-          })}
+          {/* holes — one hit-area layer per board, above wires */}
+          {boards.map((b) => renderBoardHoles(b))}
 
           {/* parts — the wrapper g turns a press on a placed part into a move-drag */}
-          {project.parts.map((part) => (
+          {project.parts.map((part) => {
+            const pb = project.boards.find((b) => b.id === part.pins[0]?.board) ?? project.boards[0];
+            return (
             <g
               key={part.id}
               onPointerDown={(e) => {
@@ -483,7 +581,8 @@ function CanvasInner(props: Props & { initialScale: number }) {
                 key={part.id}
                 part={part}
                 pos={pos}
-                boardKind={board.kind}
+                boardKind={pb.kind}
+                originY={pb.y ?? 0}
                 selected={selection?.kind === 'part' && selection.id === part.id}
                 sim={running ? simResult : null}
                 liveClosed={liveSwitches[part.id] ?? (part.type === 'switch' || part.type === 'button' ? part.props.closed ?? false : false)}
@@ -493,30 +592,42 @@ function CanvasInner(props: Props & { initialScale: number }) {
                 interactive={running}
               />
             </g>
-          ))}
+            );
+          })}
 
           {/* ghost preview */}
-          {ghost?.kind === 'multi' && (
-            <rect
-              x={colX(board.kind, ghost.col) - 8}
-              y={rowY(board.kind, 'e') - 10}
-              width={ghost.spans * PITCH + 8}
-              height={rowY(board.kind, 'f') - rowY(board.kind, 'e') + 12}
-              rx={5}
-              fill={ghost.ok ? '#d97706' : '#dc2626'}
-              opacity={0.25}
-              stroke={ghost.ok ? '#d97706' : '#dc2626'}
-              strokeDasharray="5 3"
-            />
-          )}
-          {placement && placement.anchor && hoverKey && placement.type !== 'chip' && placement.type !== 'seg7' && (
-            <line
-              x1={pos(placement.anchor).x} y1={pos(placement.anchor).y}
-              x2={Number(hoverKey.split(':')[1]) !== undefined ? colX(board.kind, Number(hoverKey.split(':')[1])) : 0}
-              y2={rowY(board.kind, hoverKey.split(':')[2] as never)}
-              stroke="#d97706" strokeWidth={2.5} strokeDasharray="6 4" opacity={0.8}
-            />
-          )}
+          {ghost?.kind === 'multi' && (() => {
+            const gb = boards.find((b) => b.id === ghost.boardId) ?? boards[0];
+            const gx = gb.x ?? 0;
+            const gy = gb.y ?? 0;
+            return (
+              <rect
+                x={gx + colX(gb.kind, ghost.col) - 8}
+                y={gy + rowY(gb.kind, 'e') - 10}
+                width={ghost.spans * PITCH + 8}
+                height={rowY(gb.kind, 'f') - rowY(gb.kind, 'e') + 12}
+                rx={5}
+                fill={ghost.ok ? '#d97706' : '#dc2626'}
+                opacity={0.25}
+                stroke={ghost.ok ? '#d97706' : '#dc2626'}
+                strokeDasharray="5 3"
+              />
+            );
+          })()}
+          {placement && placement.anchor && hoverKey && placement.type !== 'chip' && placement.type !== 'seg7' && (() => {
+            const seg = hoverKey.split(':');
+            const hb = boards.find((b) => b.id === seg[0]) ?? boards[0];
+            const hcol = Number(seg[1]);
+            const hrow = seg[2];
+            return (
+              <line
+                x1={pos(placement.anchor).x} y1={pos(placement.anchor).y}
+                x2={(hb.x ?? 0) + colX(hb.kind, hcol)}
+                y2={(hb.y ?? 0) + rowY(hb.kind, hrow as never)}
+                stroke="#d97706" strokeWidth={2.5} strokeDasharray="6 4" opacity={0.8}
+              />
+            );
+          })()}
           {/* drop target ring while dragging a wire or two-pin part over a hole (red = occupied) */}
           {dndPayload && dndHoverKey && (dndPayload.kind === 'wire' || (dndPayload.type !== 'chip' && dndPayload.type !== 'seg7')) && (() => {
             const p = pos(parseHoleKey(dndHoverKey));
@@ -538,6 +649,12 @@ function CanvasInner(props: Props & { initialScale: number }) {
           className="h-8 w-8 rounded-md border border-stone-300 bg-white text-stone-700 shadow-sm hover:bg-stone-50"
           onClick={() => setView((v) => ({ ...v, scale: Math.max(0.35, v.scale / 1.2) }))}
         >−</button>
+        <button
+          type="button" aria-label="Zoom to fit all boards"
+          title="Zoom to fit all boards"
+          className="h-8 w-8 rounded-md border border-stone-300 bg-white text-stone-700 shadow-sm hover:bg-stone-50"
+          onClick={fitAll}
+        >⤢</button>
         <button
           type="button" aria-label="Reset view"
           className="h-8 w-8 rounded-md border border-stone-300 bg-white text-xs text-stone-700 shadow-sm hover:bg-stone-50"
@@ -615,6 +732,8 @@ interface PartGraphicProps {
   part: PartInstance;
   pos: (h: HoleRef) => { x: number; y: number };
   boardKind: 'half400' | 'full830';
+  /** workbench Y of the part's board (strip rows are kind-independent) */
+  originY: number;
   selected: boolean;
   sim: SimResult | null;
   liveClosed: boolean;
@@ -625,7 +744,7 @@ interface PartGraphicProps {
 }
 
 const PartGraphic = memo(function PartGraphic({
-  part, pos, boardKind, selected, sim, liveClosed, onSelect, onSwitchToggle, onButtonPress, interactive,
+  part, pos, boardKind, originY, selected, sim, liveClosed, onSelect, onSwitchToggle, onButtonPress, interactive,
 }: PartGraphicProps) {
   const pts = part.pins.map(pos);
   const stroke = selected ? '#d97706' : undefined;
@@ -639,8 +758,8 @@ const PartGraphic = memo(function PartGraphic({
     const spans = pkg === 'DIP8' ? 4 : pkg === 'DIP14' ? 7 : 8;
     const x1 = pts[0].x - 8;
     const x2 = pts[spans - 1].x + 8;
-    const y1 = rowY(boardKind, 'e') - 9;
-    const y2 = rowY(boardKind, 'f') + 9;
+    const y1 = rowY(boardKind, 'e') + originY - 9;
+    const y2 = rowY(boardKind, 'f') + originY + 9;
     const cx = (x1 + x2) / 2;
     const cy = (y1 + y2) / 2;
     return (
@@ -681,8 +800,8 @@ const PartGraphic = memo(function PartGraphic({
   if (part.type === 'seg7') {
     const x1 = pts[0].x - 9;
     const x2 = pts[4].x + 9;
-    const y1 = rowY(boardKind, 'e') - 11;
-    const y2 = rowY(boardKind, 'f') + 11;
+    const y1 = rowY(boardKind, 'e') + originY - 11;
+    const y2 = rowY(boardKind, 'f') + originY + 11;
     const states = sim?.segStates.get(part.id);
     const segGeo: Record<string, { x: number; y: number; w: number; h: number }> = (() => {
       const w = x2 - x1;

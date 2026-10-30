@@ -362,3 +362,28 @@ export function occupiedHoles(parts: PartInstance[], wires: { from: HoleRef; to:
   }
   return s;
 }
+
+/**
+ * Nearest existing tie-point across ALL workbench boards.
+ * (wx, wy) are workbench coordinates; each board occupies its (x, y) offset.
+ * Rail-gap columns are skipped, and each board contributes only if the point
+ * is within snap distance of one of its rows.
+ */
+export function nearestHoleOnBoards(boards: Breadboard[], wx: number, wy: number): HoleRef | null {
+  let best: { hole: HoleRef; dist: number } | null = null;
+  for (const b of boards) {
+    const lx = wx - (b.x ?? 0);
+    const ly = wy - (b.y ?? 0);
+    const d = boardDims(b.kind);
+    const col = Math.round((lx - d.padX) / PITCH) + 1;
+    if (col < 1 || col > BOARD_SPECS[b.kind].cols) continue;
+    for (const row of ALL_ROWS) {
+      const dy = Math.abs(rowY(b.kind, row) - ly);
+      if (dy > PITCH * 0.75) continue;
+      if (best && dy >= best.dist) continue;
+      if (!holeExists(b.kind, b.railLayout, row, col)) continue;
+      best = { hole: { board: b.id, col, row }, dist: dy };
+    }
+  }
+  return best?.hole ?? null;
+}

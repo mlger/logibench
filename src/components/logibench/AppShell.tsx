@@ -257,7 +257,7 @@ export default function AppShell() {
               <Palette />
             </aside>
             <section className="flex min-w-0 flex-col gap-3" aria-label="Breadboard">
-              <div className="relative h-[420px] lg:h-[440px]">
+              <div className="relative h-[440px] lg:h-[500px]">
                 <BreadboardCanvas
                   project={project}
                   simResult={simResult}
@@ -271,6 +271,7 @@ export default function AppShell() {
                   onHoleHover={() => {}}
                   onPartClick={(id) => useEditor.getState().select({ kind: 'part', id })}
                   onWireClick={(id) => useEditor.getState().select({ kind: 'wire', id })}
+                  onBoardClick={(id) => useEditor.getState().select({ kind: 'board', id })}
                   onBackground={() => useEditor.getState().select(null)}
                   onSwitchToggle={(id) => useEditor.getState().toggleSwitch(id)}
                   onButtonPress={(id, closed) => useEditor.getState().pressButton(id, closed)}
