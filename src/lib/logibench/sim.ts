@@ -135,14 +135,21 @@ export class Simulator {
     const netlist = buildNetlist(project, { switchStates: this.switchStates });
     const { nets, pinNet } = netlist;
 
-    // --- supply ---
-    const supply = project.parts.find((p) => p.type === 'supply');
-    let vccNet: number | undefined;
-    let gndNet: number | undefined;
-    if (supply && supply.pins.length >= 2) {
-      vccNet = netlist.holeNet.get(holeKey(supply.pins[0]));
-      gndNet = netlist.holeNet.get(holeKey(supply.pins[1]));
+    // --- supplies (multi-supply: EVERY supply drives its own two nets) ---
+    const supplies = project.parts.filter((p) => p.type === 'supply' && p.pins.length >= 2);
+    const suppliedHigh = new Set<number>();
+    const suppliedLow = new Set<number>();
+    const supplyNets: { partId: string; high: number | undefined; low: number | undefined; volts: number }[] = [];
+    for (const s of supplies) {
+      const high = netlist.holeNet.get(holeKey(s.pins[0]));
+      const low = netlist.holeNet.get(holeKey(s.pins[1]));
+      supplyNets.push({ partId: s.id, high, low, volts: s.props.volts ?? 5 });
+      if (high !== undefined) suppliedHigh.add(high);
+      if (low !== undefined) suppliedLow.add(low);
     }
+    // first supply's nets kept for ERC diagnostics (7490 gotcha hint)
+    const vccNet = supplyNets[0]?.high;
+    const gndNet = supplyNets[0]?.low;
 
     // --- chip powered map ---
     const powered = new Map<string, boolean>();
@@ -152,7 +159,7 @@ export class Simulator {
       if (!def || def.refOnly) { powered.set(part.id, false); continue; }
       const pv = pinNet(part.id, def.power.vcc);
       const pg = pinNet(part.id, def.power.gnd);
-      powered.set(part.id, vccNet !== undefined && gndNet !== undefined && pv === vccNet && pg === gndNet);
+      powered.set(part.id, pv !== undefined && pg !== undefined && suppliedHigh.has(pv) && suppliedLow.has(pg));
     }
 
     const levels = new Map<number, NetLevel>();
@@ -161,12 +168,6 @@ export class Simulator {
       if (!drivers.has(net)) drivers.set(net, []);
       drivers.get(net)!.push(d);
     };
-
-    // rail drives
-    for (const net of nets) {
-      if (net.isVccRail && net.id === vccNet) addDrive(net.id, { partId: supply?.id ?? 'supply', value: 1, strength: 'strong', family: 'generic', kind: 'rail' });
-      if (net.isGndRail && net.id === gndNet) addDrive(net.id, { partId: supply?.id ?? 'supply', value: 0, strength: 'strong', family: 'generic', kind: 'rail' });
-    }
 
     const readInput = (part: PartInstance, def: ChipDef, pin: number, iter: number): Logic => {
       const net = pinNet(part.id, pin);
@@ -196,9 +197,10 @@ export class Simulator {
     // --- fixed point ---
     for (let iter = 0; iter < MAX_ITER; iter++) {
       drivers.clear();
-      for (const net of nets) {
-        if (net.isVccRail && net.id === vccNet) addDrive(net.id, { partId: supply?.id ?? 'supply', value: 1, strength: 'strong', family: 'generic', kind: 'rail' });
-        if (net.isGndRail && net.id === gndNet) addDrive(net.id, { partId: supply?.id ?? 'supply', value: 0, strength: 'strong', family: 'generic', kind: 'rail' });
+      // supply drives — each supply powers the nets its terminals actually touch
+      for (const sn of supplyNets) {
+        if (sn.high !== undefined) addDrive(sn.high, { partId: sn.partId, value: 1, strength: 'strong', family: 'generic', kind: 'rail' });
+        if (sn.low !== undefined) addDrive(sn.low, { partId: sn.partId, value: 0, strength: 'strong', family: 'generic', kind: 'rail' });
       }
       let changed = false;
 
@@ -230,8 +232,10 @@ export class Simulator {
         } else if (part.type === 'clock555') {
           const net = pinNet(part.id, 3);
           const st = this.clock555.get(part.id)!;
-          const value: Logic = net !== undefined && vccNet !== undefined && gndNet !== undefined
-            && pinNet(part.id, 1) === vccNet && pinNet(part.id, 2) === gndNet ? st.out : 'X';
+          const p1 = pinNet(part.id, 1);
+          const p2 = pinNet(part.id, 2);
+          const value: Logic = net !== undefined && p1 !== undefined && p2 !== undefined
+            && suppliedHigh.has(p1) && suppliedLow.has(p2) ? st.out : 'X';
           if (net !== undefined) addDrive(net, { partId: part.id, value, strength: 'strong', family: 'NE555', kind: 'out' });
         }
       }
@@ -281,6 +285,7 @@ export class Simulator {
 
     const ctx: ErcContext = {
       project, netlist, nets, levels, drivers, powered, vccNet, gndNet,
+      suppliedHigh, suppliedLow, supplyNets,
       ledStates, segStates, segCurrents, counterValues,
     };
     const issues: SimIssue[] = runErc(ctx);
@@ -444,10 +449,15 @@ export class Simulator {
           const aNet = netlist.holeNet.get(holeKey(part.pins[0]));
           const kNet = netlist.holeNet.get(holeKey(part.pins[1]));
           const { i, noResistor, ok } = diodeCurrent(aNet, kNet, 2.0);
+          // direction matters: pin 1 = anode, pin 2 = cathode. If the LED is
+          // dark but would light flipped around, flag it for the ERC.
+          const rev = diodeCurrent(kNet, aNet, 2.0);
+          const reversed = i <= 0.5 && rev.ok && rev.i > 0.5;
           const brightness = ok ? Math.min(1, i / 15) : 0;
           ledStates.set(part.id, {
             brightness, currentMA: i, noResistor: noResistor && i > 0,
             overcurrent: i > 30,
+            ...(reversed ? { reversed: true } : {}),
           });
         } else if (part.type === 'seg7' && part.pins.length >= 10) {
           const states: Record<string, SegmentState> = {};

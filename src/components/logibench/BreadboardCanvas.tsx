@@ -889,12 +889,21 @@ const PartGraphic = memo(function PartGraphic({
     const color = part.props.color ?? 'red';
     const litColor = color === 'red' ? '#ef4444' : color === 'green' ? '#22c55e' : color === 'yellow' ? '#eab308' : '#38bdf8';
     const on = (st?.brightness ?? 0) > 0.02;
+    // flat side on the cathode (pin 2) end, like a real 5 mm LED
+    const ang = Math.atan2(b.y - my, b.x - mx);
+    const fx = Math.cos(ang + Math.PI / 2);
+    const fy = Math.sin(ang + Math.PI / 2);
+    const ex = mx + 6.5 * Math.cos(ang);
+    const ey = my + 6.5 * Math.sin(ang);
     return (
       <g onClick={(e) => { e.stopPropagation(); onSelect(); }} style={{ cursor: 'pointer' }}>
         <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#44403c" strokeWidth={1.4} />
         {on && <circle cx={mx} cy={my} r={11} fill={litColor} opacity={0.25 + 0.3 * (st?.brightness ?? 0)} />}
         <circle cx={mx} cy={my} r={6.5} fill={on ? litColor : '#57534e'} stroke={stroke ?? '#292524'} strokeWidth={selectedW || 1} opacity={on ? 0.45 + 0.55 * (st?.brightness ?? 0) : 1} />
+        <line x1={ex + fx * 3.2} y1={ey + fy * 3.2} x2={ex - fx * 3.2} y2={ey - fy * 3.2} stroke="#292524" strokeWidth={1.7} strokeLinecap="round" />
+        {st?.reversed && <text x={mx} y={my - 11} textAnchor="middle" fontSize={8} fontWeight={700} fill="#b45309">↔</text>}
         {st?.noResistor && <circle cx={mx + 9} cy={my - 9} r={5} fill="#dc2626" />}
+        <title>LED — pin 1 anode (+, long leg), pin 2 cathode (−, flat side)</title>
       </g>
     );
   }
@@ -951,11 +960,26 @@ const PartGraphic = memo(function PartGraphic({
     const b = pts[1];
     const mx = (a.x + b.x) / 2;
     const my = (a.y + b.y) / 2;
+    const farads = part.props.farads ?? 1e-7;
+    const electrolytic = farads >= 1e-6;
+    const label = farads >= 1e-6 ? `${(farads * 1e6).toFixed(farads >= 1e-5 ? 0 : 1)} µF` : `${(farads * 1e9).toFixed(0)} nF`;
     return (
       <g onClick={(e) => { e.stopPropagation(); onSelect(); }} style={{ cursor: 'pointer' }}>
         <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#44403c" strokeWidth={1.2} />
-        <ellipse cx={mx} cy={my} rx={7.5} ry={5.5} fill="#d6b68a" stroke={stroke ?? '#78350f'} strokeWidth={selectedW || 0.8} />
-        <title>0.1 µF decoupling capacitor</title>
+        {electrolytic ? (
+          <g>
+            {/* radial can: dark body + light minus-stripe toward pin 2 */}
+            <rect x={mx - 9} y={my - 6.5} width={18} height={13} rx={3.5} fill="#26212e" stroke={stroke ?? '#0c0a09'} strokeWidth={selectedW || 0.8} />
+            <rect x={a.x <= b.x ? mx - 9 : mx + 5.5} y={my - 6.5} width={3.5} height={13} fill="#d6d3d1" opacity={0.85} />
+            <text x={mx} y={my + 2.6} textAnchor="middle" fontSize={5.5} fill="#e7e5e4" fontFamily="ui-monospace, monospace">{label}</text>
+          </g>
+        ) : (
+          <g>
+            <ellipse cx={mx} cy={my} rx={7.5} ry={5.5} fill="#d6b68a" stroke={stroke ?? '#78350f'} strokeWidth={selectedW || 0.8} />
+            <text x={mx} y={my + 2.4} textAnchor="middle" fontSize={5.5} fill="#78350f" fontFamily="ui-monospace, monospace">{label}</text>
+          </g>
+        )}
+        <title>{electrolytic ? `${label} electrolytic — polarity matters: pin 1 = +, pin 2 = −` : `${label} ceramic capacitor`}</title>
       </g>
     );
   }
@@ -972,8 +996,8 @@ const PartGraphic = memo(function PartGraphic({
         <rect x={x1} y={y1} width={w} height={h} rx={6} fill="#0c0a09" stroke={stroke ?? '#000'} strokeWidth={selectedW} />
         <circle cx={a.x} cy={a.y} r={3.5} fill="#ef4444" />
         <circle cx={b.x} cy={b.y} r={3.5} fill={stroke ?? '#d6d3d1'} />
-        <text x={x1 + w / 2} y={y1 + h / 2 + 3} textAnchor="middle" fontSize={9} fontWeight={700} fill="#fafaf9" fontFamily="ui-monospace, monospace">+5V</text>
-        <title>5 V supply — + and −</title>
+        <text x={x1 + w / 2} y={y1 + h / 2 + 3} textAnchor="middle" fontSize={9} fontWeight={700} fill="#fafaf9" fontFamily="ui-monospace, monospace">+{(part.props.volts ?? 5).toFixed((part.props.volts ?? 5) % 1 ? 1 : 0)}V</text>
+        <title>Bench supply — + terminal to + net, − terminal to − net</title>
       </g>
     );
   }

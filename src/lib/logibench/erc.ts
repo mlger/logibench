@@ -17,7 +17,11 @@ export interface ErcContext {
   powered: Map<string, boolean>;
   vccNet?: number;
   gndNet?: number;
-  ledStates: Map<string, { brightness: number; currentMA?: number; noResistor?: boolean; overcurrent?: boolean }>;
+  /** nets contacted by any supply's + / − terminal (multi-supply) */
+  suppliedHigh: Set<number>;
+  suppliedLow: Set<number>;
+  supplyNets: { partId: string; high?: number; low?: number; volts: number }[];
+  ledStates: Map<string, { brightness: number; currentMA?: number; noResistor?: boolean; overcurrent?: boolean; reversed?: boolean }>;
   segStates: Map<string, Record<string, { lit: boolean; brightness: number; noResistor?: boolean; overcurrent?: boolean }>>;
   segCurrents: Map<string, number>;
   counterValues: Map<string, number>;
@@ -39,8 +43,8 @@ export function runErc(ctx: ErcContext): SimIssue[] {
   };
 
   /* --- rule: power supply present + wired --- */
-  const supply = project.parts.find((p) => p.type === 'supply');
-  if (!supply) {
+  const supplies = ctx.supplyNets;
+  if (supplies.length === 0) {
     issues.push({
       id: nid(), rule: 'no-supply', severity: 'error',
       title: 'No power supply in the project',
@@ -48,13 +52,40 @@ export function runErc(ctx: ErcContext): SimIssue[] {
       why: 'Every IC needs VCC and GND; the simulator powers chips only through them.',
       refs: [],
     });
-  } else if (vccNet === undefined || gndNet === undefined) {
-    issues.push({
-      id: nid(), rule: 'supply-unwired', severity: 'error',
-      title: 'Supply terminals are not wired',
-      detail: 'Wire the supply + and − terminals to the + and − rails (or anywhere in the circuit).',
-      refs: [{ partId: supply.id }],
-    });
+  } else {
+    for (const s of supplies) {
+      if (s.high !== undefined && s.high === s.low) {
+        issues.push({
+          id: nid(), rule: 'supply-unwired', severity: 'error',
+          title: 'A supply\'s + and − terminals land on the same net',
+          detail: 'The supply\'s + and − contacts are electrically joined — move them onto separate nets (typically the + and − rails).',
+          why: 'A supply shorted across itself delivers no power and on a real bench trips the supply or melts wires.',
+          refs: [{ partId: s.partId }],
+        });
+        break;
+      }
+    }
+    /* --- rule: two supplies fighting on one net --- */
+    outer: for (let i = 0; i < supplies.length; i++) {
+      for (let j = i + 1; j < supplies.length; j++) {
+        const a = supplies[i];
+        const b = supplies[j];
+        const crossed = (a.high !== undefined && a.high === b.low) || (a.low !== undefined && a.low === b.high);
+        const parallelUnequal = (a.high !== undefined && a.high === b.high || a.low !== undefined && a.low === b.low) && a.volts !== b.volts;
+        if (crossed || parallelUnequal) {
+          issues.push({
+            id: nid(), rule: 'supply-conflict', severity: 'error',
+            title: `Two supplies fight on one net (${a.volts} V vs ${b.volts} V)`,
+            detail: crossed
+              ? 'The + terminal of one supply is wired to the − terminal of the other — a dead short across both supplies.'
+              : 'Two supplies with different voltages are paralleled on one net. Only supplies at the SAME voltage may share a net.',
+            why: 'On the bench, paralleling unequal supplies forces large currents between the regulators — they overheat or shut down.',
+            refs: [{ partId: a.partId }, { partId: b.partId }],
+          });
+          break outer;
+        }
+      }
+    }
   }
 
   /* --- rule: chip power pins (7490 special case) --- */
@@ -162,6 +193,16 @@ export function runErc(ctx: ErcContext): SimIssue[] {
 
   /* --- rule: LED / segment resistors --- */
   for (const [partId, st] of ctx.ledStates) {
+    if (st.reversed) {
+      issues.push({
+        id: nid(), rule: 'led-reversed', severity: 'warning',
+        title: 'LED is in backwards',
+        detail: 'Pin 1 is the anode (+, long leg), pin 2 the cathode (−, flat side). This LED is dark because current cannot flow — flip it around (or swap its two holes).',
+        why: 'An LED conducts only from anode to cathode; reversed it blocks (and beyond ~5 V reverse breakdown kills it).',
+        refs: [{ partId }],
+      });
+      continue;
+    }
     if (st.noResistor && st.brightness > 0) {
       issues.push({
         id: nid(), rule: 'led-no-resistor', severity: 'error',
@@ -346,11 +387,12 @@ export function runErc(ctx: ErcContext): SimIssue[] {
     if (part.type !== 'clock555') continue;
     const pv = netlist.pinNet(part.id, 1);
     const pg = netlist.pinNet(part.id, 2);
-    if (vccNet === undefined || pv !== vccNet || pg !== gndNet) {
+    const okP = pv !== undefined && pg !== undefined && ctx.suppliedHigh.has(pv) && ctx.suppliedLow.has(pg);
+    if (!okP) {
       issues.push({
         id: nid(), rule: 'clock-unpowered', severity: 'error',
         title: '555 clock module is not powered',
-        detail: 'Wire the module V+ to the + rail and GND to the − rail. TI NE555 (SLFS022): VCC 4.5–16 V.',
+        detail: 'Wire the module V+ to a net fed by a supply\'s + terminal and GND to a supply\'s − terminal. TI NE555 (SLFS022): VCC 4.5–16 V.',
         refs: [{ partId: part.id }],
       });
     }

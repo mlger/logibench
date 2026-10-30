@@ -214,6 +214,10 @@ export default function Inspector() {
               >{c}</button>
             ))}
           </div>
+          <p className="mt-2 rounded-md bg-stone-50 p-2 text-[10px] leading-relaxed text-stone-500">
+            Direction matters: <b>pin 1 = anode</b> (+, long leg), <b>pin 2 = cathode</b> (−, flat side).
+            Backwards = dark — the ERC flags it. Series resistor required (ERC checks ≥ 220 Ω).
+          </p>
         </div>
       )}
 
@@ -258,11 +262,44 @@ export default function Inspector() {
       )}
 
       {part?.type === 'cap' && (
-        <p className="text-[11px] text-stone-500">0.1 µF decoupling cap — place across VCC–GND of each IC (ERC checks this).</p>
+        <div>
+          <Label className="text-[11px] text-stone-500">Value</Label>
+          <div className="mt-1.5 flex gap-1.5">
+            {([
+              [1e-7, '100 nF ceramic'],
+              [1e-6, '1 µF electrolytic'],
+              [1e-5, '10 µF electrolytic'],
+            ] as const).map(([f, label]) => (
+              <button
+                key={f} type="button"
+                onClick={() => updatePart(part.id, { farads: f })}
+                className={`rounded-md border px-2 py-1 text-[10px] ${part.props.farads === f ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600'}`}
+              >{label}</button>
+            ))}
+          </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-stone-500">
+            100 nF ceramic decouples each IC (ERC checks this). Electrolytics (≥ 1 µF) are polarized: pin 1 = +, pin 2 = −.
+          </p>
+        </div>
       )}
 
       {part?.type === 'supply' && (
-        <p className="text-[11px] text-stone-500">Fixed 5 V supply. + terminal (red) → + rail, − (dark) → − rail.</p>
+        <div>
+          <Label className="text-[11px] text-stone-500">Voltage</Label>
+          <div className="mt-1.5 flex gap-1.5">
+            {([3.3, 5, 9, 12] as const).map((v) => (
+              <button
+                key={v} type="button"
+                onClick={() => updatePart(part.id, { volts: v })}
+                className={`rounded-md border px-2 py-1 font-mono text-[10px] ${part.props.volts === v ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600'}`}
+              >{v} V</button>
+            ))}
+          </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-stone-500">
+            + terminal (red) → + net, − terminal (dark) → − net. Multiple supplies are fine on separate nets —
+            paralleling different voltages on one net is a short (ERC errors).
+          </p>
+        </div>
       )}
 
       {def && !def.refOnly && (

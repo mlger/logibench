@@ -233,6 +233,8 @@ export interface LedState {
   currentMA?: number;
   noResistor?: boolean;
   overcurrent?: boolean;
+  /** dark because pins are swapped (would light if flipped) */
+  reversed?: boolean;
 }
 
 export interface SegmentState {
