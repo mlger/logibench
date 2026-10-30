@@ -58,7 +58,8 @@ export default function BreadboardCanvas(props: Props) {
 function CanvasInner(props: Props & { initialScale: number }) {
   const { project, simResult, selection, placement, wireStart, running, liveSwitches } = props;
   const boards = project.boards;
-  const [view, setView] = useState({ x: 0, y: 0, scale: props.initialScale });
+  // start shifted down a touch so the board header bars (drawn above y=0) stay visible
+  const [view, setView] = useState({ x: 0, y: 30, scale: props.initialScale });
   const svgRefInt = useRef<SVGSVGElement | null>(null);
   const svgRef = props.svgRef ?? svgRefInt;
   const dragRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
@@ -357,20 +358,6 @@ function CanvasInner(props: Props & { initialScale: number }) {
     const sel = selectedBoardId === b.id;
     return (
       <g key={b.id} transform={`translate(${bx},${by})`}>
-        {/* board header — drag grip + label */}
-        <g
-          data-testid={`board-header-${b.id}`}
-          style={{ cursor: 'grab' }}
-          onPointerDown={(e) => beginBoardDrag(b, e)}
-          onClick={(e) => { e.stopPropagation(); props.onBoardClick(b.id); }}
-        >
-          <rect x={4} y={-21} width={dims.width - 6} height={17} rx={5} fill={sel ? '#44403c' : '#78716c'} opacity={0.94} />
-          <circle cx={15} cy={-12.5} r={2} fill="#d6d3d1" />
-          <circle cx={21} cy={-12.5} r={2} fill="#d6d3d1" />
-          <text x={29} y={-9} fontSize={9.5} fontWeight={700} fill="#fafaf9" fontFamily="ui-monospace, monospace">{b.label ?? b.id}</text>
-          <text x={dims.width - 14} y={-9} textAnchor="end" fontSize={8} fill="#e7e5e4">{b.kind === 'full830' ? '830 pt' : '400 pt'}</text>
-          <title>Drag to move the board — click to select it</title>
-        </g>
         {/* base */}
         <rect x={6} y={4} width={dims.width - 4} height={dims.height - 8} rx={10} fill={BOARD_BG} stroke={sel ? '#d97706' : '#d6d3d1'} strokeWidth={sel ? 2.5 : 2} />
         {/* rail art — per-group tint + silk lines (red = +, blue = −), like the full-plus reference photo */}
@@ -431,6 +418,31 @@ function CanvasInner(props: Props & { initialScale: number }) {
             </g>
           );
         })}
+      </g>
+    );
+  };
+
+  const renderBoardHeader = (b: Breadboard) => {
+    const dragging = dragBoard?.id === b.id;
+    const bx = dragging ? dragBoard!.x : (b.x ?? 0);
+    const by = dragging ? dragBoard!.y : (b.y ?? 0);
+    const dims = boardDims(b.kind);
+    const sel = selectedBoardId === b.id;
+    return (
+      <g key={b.id} transform={`translate(${bx},${by})`}>
+        <g
+          data-testid={`board-header-${b.id}`}
+          style={{ cursor: 'grab' }}
+          onPointerDown={(e) => beginBoardDrag(b, e)}
+          onClick={(e) => { e.stopPropagation(); props.onBoardClick(b.id); }}
+        >
+          <rect x={4} y={-21} width={dims.width - 6} height={17} rx={5} fill={sel ? '#44403c' : '#78716c'} opacity={0.94} />
+          <circle cx={15} cy={-12.5} r={2} fill="#d6d3d1" />
+          <circle cx={21} cy={-12.5} r={2} fill="#d6d3d1" />
+          <text x={29} y={-9} fontSize={9.5} fontWeight={700} fill="#fafaf9" fontFamily="ui-monospace, monospace">{b.label ?? b.id}</text>
+          <text x={dims.width - 14} y={-9} textAnchor="end" fontSize={8} fill="#e7e5e4">{b.kind === 'full830' ? '830 pt' : '400 pt'}</text>
+          <title>Drag to move the board — click to select it</title>
+        </g>
       </g>
     );
   };
@@ -556,6 +568,9 @@ function CanvasInner(props: Props & { initialScale: number }) {
           {wireDrag?.hole && (
             <WireDragLayer svgRef={svgRef} view={view} origin={wireDrag.hole} pos={pos} color={wireColor} />
           )}
+
+          {/* board headers — above the wires so jumper arcs never shadow the grip */}
+          {boards.map((b) => renderBoardHeader(b))}
 
           {/* holes — one hit-area layer per board, above wires */}
           {boards.map((b) => renderBoardHoles(b))}

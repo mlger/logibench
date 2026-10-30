@@ -1,6 +1,8 @@
 # Breadboard Bench — realistic wiring & components, multiple breadboards
 
-**Status:** plan only — not implemented yet.
+**Status:** implemented (all five milestones shipped — M1 `0cd9782`, M2 `440006b`,
+M3 `aea1f23`, M4 `a6a84eb`, M5 `78685a5`; regression audit
+`bench-board-audit.ts` 110/110).
 **Scope:** four upgrades to the Bench tab, driven by the reference photo
 (`upload/Breadboard_full_plus.svg.webp`, a BB830-style "full-plus" 830-point
 board): **(A)** a realistic rail model (5-hole groups with breaks, matching the
