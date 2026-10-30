@@ -7,6 +7,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Drag-to-draw wires: press any exposed hole and drag to another hole — a live
+  dashed rubber-band in the current wire color follows the pointer, the target
+  hole gets a drop ring, and releasing on a hole commits the wire. Releasing
+  off-board cancels; the previous editor mode is restored afterwards. The
+  click-hole → click-hole flow still works, and plain clicks on holes are
+  unaffected (6 px drag threshold).
+- Drag-to-trash: while moving a placed part a trash target appears in the
+  canvas corner — dropping the part on it removes the part (undoable). The
+  dragged part dims to 35 % so the original position stays readable, and the
+  drop ring turns red over occupied holes for two-pin parts.
 - Drag-and-drop for parts: drag any palette item (chips, displays, discrete
   parts) onto the board to place it — chips/displays drop in one motion,
   two-pin parts drop their first pin then take a click for the second.

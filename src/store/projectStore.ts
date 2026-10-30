@@ -57,6 +57,8 @@ export interface EditorState {
   updatePart: (id: string, props: Partial<PartInstance['props']>) => void;
   /** drag-and-drop: move an existing part so its first pin lands on `anchor` */
   movePart: (id: string, anchor: HoleRef) => void;
+  /** drag-to-trash: remove a placed part entirely */
+  removePart: (id: string) => void;
   rotateTwoPin?: undefined;
 
   toggleSwitch: (id: string) => void;
@@ -279,6 +281,13 @@ export const useEditor = create<EditorState>((set, get) => ({
       if (i >= 0) p.parts[i].pins = newPins;
     });
     set({ selection: { kind: 'part', id } });
+  },
+
+  removePart: (id) => {
+    const part = get().project.parts.find((x) => x.id === id);
+    if (!part) return;
+    get().commit((p) => { p.parts = p.parts.filter((x) => x.id !== id); });
+    set({ selection: null });
   },
 
   toggleSwitch: (id) => {

@@ -4,14 +4,15 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HoleRef, PartInstance, Project, SimResult } from '@/lib/logibench/types';
 import {
   BOARD_SPECS, PITCH, boardDims, colX, chipPackage, checkPlacement, holeKey,
-  nearestHole, parseHoleKey, partLabel, rowY,
+  nearestHole, parseHoleKey, partLabel, rowY, sameHole,
 } from '@/lib/logibench/geometry';
 import { netHolesOf, useEditor } from '@/store/projectStore';
 import { useDnd } from '@/store/dnd';
 import { beginDragTracking } from './drag';
 import { getChipDef } from '@/data/chips';
 import { resistorBands } from '@/lib/logibench/eseries';
-import type { PlacementState, Selection } from '@/store/projectStore';
+import { Trash2 } from 'lucide-react';
+import type { Mode, PlacementState, Selection } from '@/store/projectStore';
 
 export interface CanvasCallbacks {
   onHoleClick: (hole: HoleRef) => void;
@@ -63,10 +64,15 @@ function CanvasInner(props: Props & { initialScale: number }) {
   const dragRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
 
-  /* ---------- drag & drop (palette → board, part → new spot) ---------- */
+  /* ---------- drag & drop (palette → board, part → move/trash, hole → wire) ---------- */
   // payload is identity-stable per drag session — no re-render on pointer-move
   const dndPayload = useDnd((s) => s.payload);
   const [dndHoverKey, setDndHoverKey] = useState<string | null>(null);
+  const wireDrag = useDnd((s) => (s.payload?.kind === 'wire' ? s.payload : null));
+  const wireColor = useEditor((s) => s.wireColor);
+  const trashRef = useRef<HTMLDivElement | null>(null);
+  const [trashHot, setTrashHot] = useState(false);
+  const wireDragPrevMode = useRef<Mode | null>(null);
   const viewRef = useRef(view);
   useEffect(() => {
     viewRef.current = view;
@@ -81,28 +87,58 @@ function CanvasInner(props: Props & { initialScale: number }) {
       const v = viewRef.current;
       return nearestHole(board.kind, (cx - rect.left - v.x) / v.scale, (cy - rect.top - v.y) / v.scale, board.id);
     };
+    const trashHit = (cx: number, cy: number) => {
+      const el = trashRef.current;
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return cx >= r.left - 14 && cx <= r.right + 14 && cy >= r.top - 14 && cy <= r.bottom + 14;
+    };
     const onMove = (ev: PointerEvent) => {
       const h = clientToHole(ev.clientX, ev.clientY);
       const k = h ? holeKey(h) : null;
       setDndHoverKey((prev) => (prev === k ? prev : k));
+      const d = useDnd.getState().payload;
+      const hot = !!d && d.kind === 'part' && d.source === 'board' && trashHit(ev.clientX, ev.clientY);
+      setTrashHot((prev) => (prev === hot ? prev : hot));
     };
     const onUp = (ev: PointerEvent) => {
       const d = useDnd.getState().payload;
       useDnd.getState().cancel();
       setDndHoverKey(null);
+      setTrashHot(false);
       if (!d) return;
+      const st = useEditor.getState();
+      if (d.kind === 'wire') {
+        // drop on a hole completes the wire; anywhere else cancels the pending wire
+        const hole = clientToHole(ev.clientX, ev.clientY);
+        if (hole && d.hole && !sameHole(hole, d.hole)) st.addWire(d.hole, hole);
+        useEditor.setState({ wireStart: null, mode: wireDragPrevMode.current ?? 'select' });
+        wireDragPrevMode.current = null;
+        return;
+      }
+      if (d.source === 'board' && d.partId && trashHit(ev.clientX, ev.clientY)) {
+        st.removePart(d.partId);
+        return;
+      }
       const hole = clientToHole(ev.clientX, ev.clientY);
       if (!hole) return;
       if (d.source === 'palette') {
-        useEditor.getState().startPlacement(d.type, d.defId, d.preset);
-        useEditor.getState().placeAt(hole);
+        if (!d.type) return;
+        st.startPlacement(d.type, d.defId, d.preset);
+        st.placeAt(hole);
       } else if (d.partId) {
-        useEditor.getState().movePart(d.partId, hole);
+        st.movePart(d.partId, hole);
       }
     };
     const onCancel = () => {
+      const d = useDnd.getState().payload;
       useDnd.getState().cancel();
       setDndHoverKey(null);
+      setTrashHot(false);
+      if (d?.kind === 'wire') {
+        useEditor.setState({ wireStart: null, mode: wireDragPrevMode.current ?? 'select' });
+        wireDragPrevMode.current = null;
+      }
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -113,6 +149,14 @@ function CanvasInner(props: Props & { initialScale: number }) {
       window.removeEventListener('pointercancel', onCancel);
     };
   }, [dndPayload !== null, board.kind, board.id]);
+
+  // a wire drag re-targets wireStart to its origin hole; remember the mode to restore on drop
+  useEffect(() => {
+    if (dndPayload?.kind === 'wire' && dndPayload.hole) {
+      wireDragPrevMode.current = useEditor.getState().mode;
+      useEditor.setState({ wireStart: dndPayload.hole, mode: 'wire' });
+    }
+  }, [dndPayload]);
 
   const cols = BOARD_SPECS[board.kind].cols;
 
@@ -220,6 +264,7 @@ function CanvasInner(props: Props & { initialScale: number }) {
         ref={svgRef}
         data-testid="breadboard-svg"
         className="h-full w-full cursor-grab active:cursor-grabbing"
+        style={{ touchAction: 'none' }}
         onWheel={onWheel}
         onPointerDown={onPointerDownBg}
         onPointerMove={onPointerMoveBg}
@@ -277,6 +322,11 @@ function CanvasInner(props: Props & { initialScale: number }) {
             );
           })}
 
+          {/* live rubber-band while dragging a wire from a hole */}
+          {wireDrag?.hole && (
+            <WireDragLayer svgRef={svgRef} view={view} origin={wireDrag.hole} pos={pos} color={wireColor} />
+          )}
+
           {/* holes */}
           {rows.map((row) =>
             Array.from({ length: cols }, (_, ci) => {
@@ -299,6 +349,13 @@ function CanvasInner(props: Props & { initialScale: number }) {
                   <rect
                     x={p.x - 7} y={p.y - 7} width={14} height={14} fill="transparent"
                     style={{ cursor: 'pointer' }}
+                    onPointerDown={(e) => {
+                      // pressing an exposed hole can become a drag-to-wire gesture
+                      if (running) return;
+                      if (e.pointerType === 'mouse' && e.button !== 0) return;
+                      e.stopPropagation(); // don't pan the board
+                      beginDragTracking({ kind: 'wire', hole: { board: board.id, col, row }, label: 'wire' }, e);
+                    }}
                     onClick={(e) => handleHoleClick({ board: board.id, col, row }, e)}
                     onMouseEnter={() => handleHoleEnter({ board: board.id, col, row })}
                     onMouseLeave={handleHoleLeave}
@@ -327,11 +384,11 @@ function CanvasInner(props: Props & { initialScale: number }) {
                 if (e.pointerType === 'mouse' && e.button !== 0) return;
                 e.stopPropagation(); // don't pan the board
                 beginDragTracking(
-                  { source: 'board', type: part.type, defId: part.defId, partId: part.id, label: partLabel(part) },
+                  { kind: 'part', source: 'board', type: part.type, defId: part.defId, partId: part.id, label: partLabel(part) },
                   e,
                 );
               }}
-              style={{ touchAction: 'none' }}
+              style={{ touchAction: 'none', opacity: dndPayload?.partId === part.id ? 0.35 : 1 }}
             >
               <PartGraphic
                 key={part.id}
@@ -371,10 +428,12 @@ function CanvasInner(props: Props & { initialScale: number }) {
               stroke="#d97706" strokeWidth={2.5} strokeDasharray="6 4" opacity={0.8}
             />
           )}
-          {/* drop target ring while dragging a two-pin part over a hole */}
-          {dndPayload && dndHoverKey && dndPayload.type !== 'chip' && dndPayload.type !== 'seg7' && (() => {
+          {/* drop target ring while dragging a wire or two-pin part over a hole (red = occupied) */}
+          {dndPayload && dndHoverKey && (dndPayload.kind === 'wire' || (dndPayload.type !== 'chip' && dndPayload.type !== 'seg7')) && (() => {
             const p = pos(parseHoleKey(dndHoverKey));
-            return <circle cx={p.x} cy={p.y} r={8} fill="none" stroke="#d97706" strokeWidth={2} strokeDasharray="3 2" pointerEvents="none" />;
+            const occupied = dndPayload.kind === 'part' &&
+              project.parts.some((pt) => pt.id !== dndPayload.partId && pt.pins.some((ph) => holeKey(ph) === dndHoverKey));
+            return <circle cx={p.x} cy={p.y} r={8} fill="none" stroke={occupied ? '#dc2626' : '#d97706'} strokeWidth={2} strokeDasharray="3 2" pointerEvents="none" />;
           })()}
         </g>
       </svg>
@@ -406,7 +465,60 @@ function CanvasInner(props: Props & { initialScale: number }) {
           <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-amber-500 bg-amber-400" /> conflict</span>
         </div>
       )}
+
+      {/* drag-to-trash target (appears while moving a placed part) */}
+      {dndPayload?.kind === 'part' && dndPayload.source === 'board' && (
+        <div
+          ref={trashRef}
+          data-testid="drag-trash"
+          aria-hidden
+          className={`pointer-events-none absolute right-3 top-3 flex h-14 w-14 items-center justify-center rounded-full border-2 shadow-md transition-all duration-100 ${trashHot ? 'scale-125 border-red-500 bg-red-500/95 text-white' : 'border-stone-300 bg-white/90 text-stone-400'}`}
+        >
+          <Trash2 className="h-6 w-6" />
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * Live rubber-band preview for hole→hole wire drags. Runs its own
+ * pointermove listener (state updates come from the event handler, never
+ * the effect body) and only mounts while a wire drag is active, so the
+ * rest of the canvas never re-renders per pointer-move.
+ */
+function WireDragLayer({ svgRef, view, origin, pos, color }: {
+  svgRef: React.RefObject<SVGSVGElement | null>;
+  view: { x: number; y: number; scale: number };
+  origin: HoleRef;
+  pos: (h: HoleRef) => { x: number; y: number };
+  color: string;
+}) {
+  const payload = useDnd((s) => s.payload);
+  const [pt, setPt] = useState<{ x: number; y: number } | null>(null);
+  const active = payload?.kind === 'wire';
+
+  useEffect(() => {
+    if (!active) return;
+    const onMove = (ev: PointerEvent) => {
+      const svg = svgRef.current;
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      setPt({ x: (ev.clientX - rect.left - view.x) / view.scale, y: (ev.clientY - rect.top - view.y) / view.scale });
+    };
+    window.addEventListener('pointermove', onMove);
+    return () => window.removeEventListener('pointermove', onMove);
+  }, [active, view, svgRef]);
+
+  if (!active || !pt) return null;
+  const a = pos(origin);
+  const midX = (a.x + pt.x) / 2;
+  const d = `M ${a.x} ${a.y} L ${midX} ${a.y} L ${midX} ${pt.y} L ${pt.x} ${pt.y}`;
+  return (
+    <g pointerEvents="none" aria-hidden>
+      <path d={d} fill="none" stroke={color} strokeWidth={3} strokeDasharray="7 5" strokeLinecap="round" opacity={0.9} />
+      <circle cx={pt.x} cy={pt.y} r={3.5} fill={color} opacity={0.9} />
+    </g>
   );
 }
 

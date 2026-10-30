@@ -12,10 +12,10 @@ const SECTION = 'text-xs font-semibold uppercase tracking-wider text-stone-500';
 
 /** pointerdown handler that turns a palette press into a drag onto the board */
 const paletteDrag =
-  (payload: DragInit) =>
+  (payload: Omit<DragInit, 'kind'>) =>
     (e: React.PointerEvent) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
-      beginDragTracking(payload, e);
+      beginDragTracking({ ...payload, kind: 'part' }, e);
     };
 
 const GRAB = 'cursor-grab active:cursor-grabbing';
@@ -65,7 +65,7 @@ export default function Palette() {
         </div>
         {mode === 'wire' && (
           <div className="mt-2 rounded-lg border border-stone-200 bg-white p-2">
-            <div className="text-[10px] font-medium text-stone-500">Wire color — click a hole, then another</div>
+            <div className="text-[10px] font-medium text-stone-500">Wire color — drag hole→hole, or click two holes</div>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {Object.entries(WIRE_COLORS).map(([name, hex]) => (
                 <button
@@ -202,7 +202,7 @@ export default function Palette() {
           </button>
           <p className="flex items-start gap-1 text-[10px] leading-snug text-stone-400">
             <GripHorizontal className="mt-0.5 h-3 w-3 shrink-0" />
-            Drag parts from here onto the board (or click, then click holes). Drag placed parts to move them. ESC cancels · Delete removes selection · hover any hole to light up its net.
+            Drag parts from here onto the board (or click, then click holes). Drag placed parts to move them — drop on the trash target to remove. Drag from any hole to draw a wire. ESC cancels · Delete removes selection · hover any hole to light up its net.
           </p>
         </div>
       </section>

@@ -3,13 +3,14 @@
 import { useDnd, type DragInit } from '@/store/dnd';
 
 /**
- * Shared pointer-based drag tracking used by both the palette (drag a part
- * onto the board) and placed parts on the canvas (drag to move).
+ * Shared pointer-based drag tracking used by the palette (drag a part onto
+ * the board), placed parts on the canvas (drag to move / drag to trash) and
+ * exposed holes (drag to draw a wire).
  *
  * A drag only activates after the pointer moves past DRAG_THRESHOLD px, so a
  * plain click still flows through to the normal click handlers. Once active,
  * the very next `click` event is suppressed (capture-phase, once) so dropping
- * does not also select/place via the click path.
+ * does not also select/place/wire via the click path.
  */
 const DRAG_THRESHOLD = 6;
 

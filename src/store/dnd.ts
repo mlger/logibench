@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import type { PartInstance, PartType } from '@/lib/logibench/types';
+import type { HoleRef, PartInstance, PartType } from '@/lib/logibench/types';
 
 /**
  * Transient drag-and-drop state for the bench.
@@ -13,12 +13,17 @@ import type { PartInstance, PartType } from '@/lib/logibench/types';
  * useSyncExternalStore would treat each snapshot as changed and loop forever.
  */
 export interface DragPayload {
-  source: 'palette' | 'board';
-  type: PartType;
+  /** what is being dragged: a part (palette → board, or board → new spot) or a wire (hole → hole) */
+  kind: 'part' | 'wire';
+  /** part drags: where the part came from */
+  source?: 'palette' | 'board';
+  type?: PartType;
   defId?: string;
   preset?: PartInstance['props'];
   /** set when source === 'board' (moving an existing part) */
   partId?: string;
+  /** wire drags: the hole the wire starts from */
+  hole?: HoleRef;
   /** short label shown in the floating drag ghost, e.g. "7430", "330 Ω" */
   label: string;
 }
