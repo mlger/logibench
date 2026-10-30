@@ -74,7 +74,7 @@ export function nearestHole(
   kind: Breadboard['kind'],
   x: number,
   y: number,
-  board = 'main',
+  board: string,
 ): HoleRef | null {
   const d = boardDims(kind);
   const spec = BOARD_SPECS[kind];
@@ -115,25 +115,25 @@ export interface Footprint {
   pinAt: (col0: number, pin: number) => HoleRef | null;
 }
 
-export function chipFootprint(pkg: 'DIP8' | 'DIP14' | 'DIP16'): Footprint {
+export function chipFootprint(pkg: 'DIP8' | 'DIP14' | 'DIP16', board: string): Footprint {
   const perSide = pkg === 'DIP8' ? 4 : pkg === 'DIP14' ? 7 : 8;
   return {
     spans: perSide,
     pinAt(col0: number, pin: number) {
-      if (pin >= 1 && pin <= perSide) return { board: 'main', col: col0 + pin - 1, row: 'e' };
+      if (pin >= 1 && pin <= perSide) return { board, col: col0 + pin - 1, row: 'e' };
       if (pin > perSide && pin <= perSide * 2)
-        return { board: 'main', col: col0 + perSide * 2 - pin, row: 'f' };
+        return { board, col: col0 + perSide * 2 - pin, row: 'f' };
       return null;
     },
   };
 }
 
-export function seg7Footprint(): Footprint {
+export function seg7Footprint(board: string): Footprint {
   return {
     spans: 5,
     pinAt(col0: number, pin: number) {
-      if (pin >= 1 && pin <= 5) return { board: 'main', col: col0 + pin - 1, row: 'e' };
-      if (pin >= 6 && pin <= 10) return { board: 'main', col: col0 + 10 - pin, row: 'f' };
+      if (pin >= 1 && pin <= 5) return { board, col: col0 + pin - 1, row: 'e' };
+      if (pin >= 6 && pin <= 10) return { board, col: col0 + 10 - pin, row: 'f' };
       return null;
     },
   };
@@ -144,11 +144,12 @@ export function twoPinFootprint(): Footprint {
 }
 
 export function partFootprint(part: PartInstance): Footprint {
+  const board = part.pins[0]?.board ?? 'main';
   if (part.type === 'chip' && part.defId) {
     const pkg = chipPackage(part.defId);
-    return chipFootprint(pkg);
+    return chipFootprint(pkg, board);
   }
-  if (part.type === 'seg7') return seg7Footprint();
+  if (part.type === 'seg7') return seg7Footprint(board);
   return twoPinFootprint();
 }
 
@@ -214,11 +215,12 @@ export function checkPlacement(
   type: PartInstance['type'],
   defId: string | undefined,
   col0: number,
+  board: string,
 ): PlacementCheck {
   const spec = BOARD_SPECS[kind];
   let fp: Footprint;
-  if (type === 'chip' && defId) fp = chipFootprint(chipPackage(defId));
-  else if (type === 'seg7') fp = seg7Footprint();
+  if (type === 'chip' && defId) fp = chipFootprint(chipPackage(defId), board);
+  else if (type === 'seg7') fp = seg7Footprint(board);
   else return { ok: true };
 
   if (col0 < 1 || col0 + fp.spans - 1 > spec.cols) {

@@ -91,6 +91,15 @@ export interface TruthRow {
 /* ---------------- Breadboard project model ---------------- */
 
 export type BoardKind = 'half400' | 'full830';
+
+/**
+ * How each board's power rails are internally connected:
+ * - continuous: the whole line is one net
+ * - center-split: broken once in the middle (classic BB400/BB830 trap)
+ * - groups5: independent 5-hole groups with 2-hole gaps, staggered per line
+ *   ("full-plus" style, see docs/breadboard-realism-multiboard-plan.md §4)
+ */
+export type RailLayout = 'continuous' | 'center-split' | 'groups5';
 export type RowName =
   | 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j'
   | '+T' | '-T' | '+B' | '-B';
@@ -104,7 +113,12 @@ export interface HoleRef {
 export interface Breadboard {
   id: string;
   kind: BoardKind;
-  railsSplit: boolean; // rails broken in the middle
+  /** "Main", "Display board", … (board header on the workbench) */
+  label?: string;
+  railLayout: RailLayout;
+  /** workbench position (board-local px, feature: multi-board workbench) */
+  x?: number;
+  y?: number;
 }
 
 export type PartType =
@@ -156,7 +170,7 @@ export interface Wire {
 }
 
 export interface Project {
-  schema: 1;
+  schema: 2;
   name: string;
   boards: Breadboard[];
   parts: PartInstance[];

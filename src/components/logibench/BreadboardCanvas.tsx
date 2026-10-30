@@ -249,12 +249,12 @@ function CanvasInner(props: Props & { initialScale: number }) {
       const partsForCheck = isDnd && dndPayload.source === 'board' && dndPayload.partId
         ? project.parts.filter((p) => p.id !== dndPayload.partId)
         : project.parts;
-      const check = checkPlacement(board.kind, partsForCheck, type, defId, col);
+      const check = checkPlacement(board.kind, partsForCheck, type, defId, col, board.id);
       const pkg = type === 'chip' ? chipPackage(defId ?? '7400') : null;
       return { kind: 'multi' as const, col, ok: check.ok, spans: type === 'seg7' ? 5 : pkg === 'DIP16' ? 8 : pkg === 'DIP14' ? 7 : 4 };
     }
     return { kind: 'two' as const, col, ok: true, spans: 1 };
-  }, [placement, hoverKey, dndPayload, dndHoverKey, board.kind, project.parts]);
+  }, [placement, hoverKey, dndPayload, dndHoverKey, board.kind, board.id, project.parts]);
 
   const rows = ['+T', '-T', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', '+B', '-B'] as const;
 
@@ -282,7 +282,7 @@ function CanvasInner(props: Props & { initialScale: number }) {
           <rect x={dims.padX - 10} y={dims.yMinusT - 7} width={cols * PITCH + 12} height={PITCH + 6} rx={6} fill="#e7e5e4" opacity={0.8} />
           <rect x={dims.padX - 10} y={dims.yPlusB - 7} width={cols * PITCH + 12} height={PITCH + 6} rx={6} fill="#fee2e2" opacity={0.55} />
           <rect x={dims.padX - 10} y={dims.yMinusB - 7} width={cols * PITCH + 12} height={PITCH + 6} rx={6} fill="#e7e5e4" opacity={0.8} />
-          {board.railsSplit && (
+          {board.railLayout === 'center-split' && (
             <rect
               x={dims.padX + Math.ceil(cols / 2) * PITCH - PITCH / 2 - 5}
               y={dims.yPlusT - 8}

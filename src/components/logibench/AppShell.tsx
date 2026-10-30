@@ -125,7 +125,8 @@ export default function AppShell() {
     reader.onload = () => {
       try {
         const p = JSON.parse(String(reader.result));
-        if (p && p.schema === 1 && Array.isArray(p.parts)) {
+        if (p && (p.schema === 1 || p.schema === 2) && Array.isArray(p.parts)) {
+          // loadProject runs migrateProject(): v1 → v2 + full sanitization
           useEditor.getState().loadProject(p);
         } else {
           alert('Not a valid LogicBench project file.');

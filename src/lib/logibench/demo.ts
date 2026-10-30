@@ -33,8 +33,8 @@ export const WIRE_COLORS = {
 
 export function emptyProject(name = 'Untitled circuit'): Project {
   return {
-    schema: 1, name,
-    boards: [{ id: 'main', kind: 'half400', railsSplit: false }],
+    schema: 2, name,
+    boards: [{ id: 'main', kind: 'half400', railLayout: 'continuous' }],
     parts: [], wires: [], notes: '',
   };
 }

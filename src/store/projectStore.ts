@@ -9,6 +9,7 @@ import {
 } from '@/lib/logibench/geometry';
 import { buildNetlist } from '@/lib/logibench/netlist';
 import { Simulator } from '@/lib/logibench/sim';
+import { migrateProject } from '@/lib/logibench/migrate';
 import { emptyProject, demo7447, demo4511 } from '@/lib/logibench/demo';
 
 export type Selection = { kind: 'part' | 'wire'; id: string } | null;
@@ -72,7 +73,7 @@ export interface EditorState {
 
   loadDemo: (which: 1 | 2) => void;
   clearAll: () => void;
-  loadProject: (p: Project) => void;
+  loadProject: (p: unknown) => void;
   setSavedId: (id: string | null) => void;
   setBoardKind: (kind: 'half400' | 'full830') => void;
   toggleRailsSplit: () => void;
@@ -150,11 +151,11 @@ export const useEditor = create<EditorState>((set, get) => ({
     if (!st.placement) return;
     const { type, defId, anchor } = st.placement;
     const project = st.project;
-    const board = project.boards[0];
+    const board = project.boards.find((b) => b.id === hole.board) ?? project.boards[0];
 
     // multi-pin: validate column anchor
     if (type === 'chip' || type === 'seg7') {
-      const check = checkPlacement(board.kind, project.parts, type, defId, hole.col);
+      const check = checkPlacement(board.kind, project.parts, type, defId, hole.col, board.id);
       if (!check.ok || !check.holes) {
         set({ placement: null });
         return;
@@ -244,12 +245,12 @@ export const useEditor = create<EditorState>((set, get) => ({
     const project = st.project;
     const part = project.parts.find((x) => x.id === id);
     if (!part) return;
-    const board = project.boards[0];
+    const board = project.boards.find((b) => b.id === anchor.board) ?? project.boards[0];
 
     // chips / displays: re-anchor to the dropped column (straddles the channel)
     if (part.type === 'chip' || part.type === 'seg7') {
       const others = project.parts.filter((x) => x.id !== id);
-      const check = checkPlacement(board.kind, others, part.type, part.defId, anchor.col);
+      const check = checkPlacement(board.kind, others, part.type, part.defId, anchor.col, board.id);
       if (!check.ok || !check.holes) return;
       get().commit((p) => {
         const i = p.parts.findIndex((x) => x.id === id);
@@ -348,9 +349,11 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 
   loadProject: (p) => {
+    const m = migrateProject(p);
+    if (!m) return;
     simulator = null;
     set({
-      project: p, past: [], future: [], selection: null, placement: null,
+      project: m.project, past: [], future: [], selection: null, placement: null,
       wireStart: null, projectId: null,
     });
     setTimeout(() => get().runSim(), 0);
@@ -366,7 +369,8 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   toggleRailsSplit: () => {
     get().commit((p) => {
-      p.boards = [{ ...p.boards[0], railsSplit: !p.boards[0].railsSplit }];
+      const b = p.boards[0];
+      p.boards = [{ ...b, railLayout: b.railLayout === 'center-split' ? 'continuous' : 'center-split' }];
     });
   },
 }));

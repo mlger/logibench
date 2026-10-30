@@ -196,9 +196,9 @@ export default function Palette() {
           <button
             type="button"
             onClick={() => useEditor.getState().toggleRailsSplit()}
-            className={`w-full rounded-lg border px-2 py-1.5 text-left text-[11px] ${project.boards[0].railsSplit ? 'border-amber-400 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-700'} hover:bg-stone-50`}
+            className={`w-full rounded-lg border px-2 py-1.5 text-left text-[11px] ${project.boards[0].railLayout === 'center-split' ? 'border-amber-400 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-700'} hover:bg-stone-50`}
           >
-            Rails split in middle: <span className="font-medium">{project.boards[0].railsSplit ? 'YES (classic trap!)' : 'no'}</span>
+            Rails split in middle: <span className="font-medium">{project.boards[0].railLayout === 'center-split' ? 'YES (classic trap!)' : 'no'}</span>
           </button>
           <p className="flex items-start gap-1 text-[10px] leading-snug text-stone-400">
             <GripHorizontal className="mt-0.5 h-3 w-3 shrink-0" />

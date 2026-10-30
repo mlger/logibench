@@ -60,12 +60,12 @@ export function buildNetlist(project: Project, opts?: { switchStates?: Map<strin
         uf.union(node.get(holeKey({ board: board.id, col, row: botRows[i] }))!, node.get(holeKey({ board: board.id, col, row: botRows[i + 1] }))!);
       }
     }
-    // rails: continuous or split mid-board
+    // rails: layout-dependent breaks (M2 adds full per-group unions)
     const mid = Math.ceil(cols / 2);
     for (const row of ['+T', '-T', '+B', '-B'] as const) {
       for (let col = 1; col < cols; col++) {
-        // split rails: no union across the middle break
-        if (board.railsSplit && col === mid) continue;
+        // center-split: no union across the middle break
+        if (board.railLayout === 'center-split' && col === mid) continue;
         const a = node.get(holeKey({ board: board.id, col, row }));
         const b = node.get(holeKey({ board: board.id, col: col + 1, row }));
         if (a !== undefined && b !== undefined) uf.union(a, b);

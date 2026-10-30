@@ -304,7 +304,7 @@ export function runErc(ctx: ErcContext): SimIssue[] {
 
   /* --- rule: split rails sanity (hidden classic bug) --- */
   for (const board of project.boards) {
-    if (board.railsSplit) {
+    if (board.railLayout && board.railLayout !== 'continuous') {
       issues.push({
         id: nid(), rule: 'rails-split-note', severity: 'info',
         title: `${board.kind === 'full830' ? 'Full-size' : 'Half-size'} board has SPLIT rails`,
