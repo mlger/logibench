@@ -241,15 +241,18 @@ export function runErc(ctx: ErcContext): SimIssue[] {
         if (!pinDef) continue;
         const fam = p.family ?? def.families[0];
         if (pinDef.dir === 'out' && fam === 'LS') lsDriver = p;
-        if (pinDef.dir === 'in' && (fam === 'HC' || fam === 'HCT' || fam === 'CD4000')) {
+        // HCT inputs are TTL-threshold (VIH min 2.0 V @ VCC 4.5 V) — an LS VOH
+        // min of 2.7 V meets them with 0.7 V margin, so HCT is the FIX, not a
+        // violation. Only HC (VIH 3.15 V) / CD4000 (VIH 3.5 V) are marginal.
+        if (pinDef.dir === 'in' && (fam === 'HC' || fam === 'CD4000')) {
           cmosReaders.push({ partId: p.id, pin: np.pin });
         }
       }
       if (lsDriver && cmosReaders.length) {
         issues.push({
           id: nid(), rule: 'ls-to-hc', severity: 'warning',
-          title: 'LS output driving a CMOS (HC/HCT) input — level not guaranteed',
-          detail: '74LS VOH min = 2.7 V but 74HC VIH min = 3.15 V (at VCC = 4.5 V). Use HCT for the interface, or add a pull-up resistor.',
+          title: 'LS output driving a CMOS (HC/CD4000) input — level not guaranteed',
+          detail: '74LS VOH min = 2.7 V but 74HC VIH min = 3.15 V (at VCC = 4.5 V). Use HCT for the interface (its VIH 2.0 V accepts an LS output), or add a pull-up resistor.',
           why: 'This is exactly why HCT was invented — TTL output levels do not reliably meet CMOS input thresholds.',
           refs: [{ partId: lsDriver.id }, ...cmosReaders.slice(0, 2)],
         });

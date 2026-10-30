@@ -19,8 +19,10 @@ function wire(from: [number, string], to: [number, string], color: string): Wire
   return { id: id('w'), from: H(from[0], from[1]), to: H(to[0], to[1]), color };
 }
 
-function part(t: PartInstance['type'], pins: [number, string][], props: PartInstance['props'], defId?: string): PartInstance {
-  return { id: id(t), type: t, defId, pins: pins.map(([c, r]) => H(c, r)), props };
+function part(t: PartInstance['type'], pins: [number, string][], props: PartInstance['props'], defId?: string, family?: PartInstance['family']): PartInstance {
+  const p: PartInstance = { id: id(t), type: t, defId, pins: pins.map(([c, r]) => H(c, r)), props };
+  if (family) p.family = family;
+  return p;
 }
 
 export const WIRE_COLORS = {
@@ -129,11 +131,12 @@ export function demo4511(): Project {
   wires.push(wire([11, 'e'], [11, '-T'], WIRE_COLORS.black)); // MS2 low
   wires.push(wire([7, 'f'], [5, 'e'], WIRE_COLORS.green));    // Q0 → CP1 (BCD jumper)
 
-  // 4511 (DIP16) at cols 14..21
+  // 4511 (DIP16) at cols 14..21 — HCT variant: the 74LS90's VOH min 2.7 V meets
+  // HCT VIH 2.0 V with margin; plain HC (VIH 3.15 V) would be marginal (ERC warns)
   // e-row: 1=B(14) 2=C(15) 3=LT(16) 4=BI(17) 5=LE(18) 6=D(19) 7=A(20) 8=GND(21)
   // f-row: 9=e(21) 10=d(20) 11=c(19) 12=b(18) 13=a(17) 14=g(16) 15=f(15) 16=VCC(14)
   parts.push(part('chip', [[14, 'e'], [15, 'e'], [16, 'e'], [17, 'e'], [18, 'e'], [19, 'e'], [20, 'e'], [21, 'e'],
-    [21, 'f'], [20, 'f'], [19, 'f'], [18, 'f'], [17, 'f'], [16, 'f'], [15, 'f'], [14, 'f']], {}, '4511'));
+    [21, 'f'], [20, 'f'], [19, 'f'], [18, 'f'], [17, 'f'], [16, 'f'], [15, 'f'], [14, 'f']], {}, '4511', 'HCT'));
   wires.push(wire([14, 'f'], [14, '+T'], WIRE_COLORS.red));   // VCC pin 16
   wires.push(wire([21, 'e'], [21, '-T'], WIRE_COLORS.black)); // GND pin 8
   wires.push(wire([16, 'e'], [16, '+T'], WIRE_COLORS.red));   // LT̅ high
@@ -173,6 +176,6 @@ export function demo4511(): Project {
 
   p.parts = parts;
   p.wires = wires;
-  p.notes = 'MVP golden circuit #2. The 555 module ticks at 1 Hz, the 7490 counts on falling edges (Q0→CP1 jumper makes it decade), the 4511 drives the common-cathode 5161AS. Note the 7490 power pins: 5 and 10!';
+  p.notes = 'MVP golden circuit #2. The 555 module ticks at 1 Hz, the 7490 counts on falling edges (Q0→CP1 jumper makes it decade), the 4511 drives the common-cathode 5161AS. Note the 7490 power pins: 5 and 10! The 4511 is the HCT variant — TTL-threshold inputs (VIH 2.0 V) accept the 74LS90\'s VOH 2.7 V; plain HC (VIH 3.15 V) would be marginal.';
   return p;
 }
