@@ -498,12 +498,15 @@ export function getChipDef(id: string | undefined): ChipDef | undefined {
   return id ? CHIP_INDEX.get(id) : undefined;
 }
 
+/** Digit → 7-segment glyph ("abcdefg", '1' = lit) — classic BCD font, tails on 6/9. */
+export const DIGIT_GLYPHS: Record<number, string> = {
+  0: '1111110', 1: '0110000', 2: '1101101', 3: '1111001', 4: '0110011',
+  5: '1011011', 6: '1011111', 7: '1110000', 8: '1111111', 9: '1111011',
+};
+
 /** Segments a..g of the classic BCD K-map lab (plan §4.6), active-HIGH with tails on 6/9. */
 export const CLASSIC_SEGMENT_EQUATIONS: Record<'a'|'b'|'c'|'d'|'e'|'f'|'g', (0|1|'X')[]> = (() => {
-  const digitGlyphs: Record<number, string> = {
-    0: '1111110', 1: '0110000', 2: '1101101', 3: '1111001', 4: '0110011',
-    5: '1011011', 6: '1011111', 7: '1110000', 8: '1111111', 9: '1111011',
-  };
+  const digitGlyphs = DIGIT_GLYPHS;
   const segs: ('a'|'b'|'c'|'d'|'e'|'f'|'g')[] = ['a','b','c','d','e','f','g'];
   const out = {} as Record<'a'|'b'|'c'|'d'|'e'|'f'|'g', (0|1|'X')[]>;
   for (const [i, seg] of segs.entries()) {

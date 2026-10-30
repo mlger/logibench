@@ -7,6 +7,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Truth table panel in the decoder design lab: a datasheet-style, fully
+  editable table (minterm codes, binary inputs, digit glyphs, all seven
+  segment outputs) wired to the same store as the K-map — edits in either
+  view sync instantly, hover/focus highlights the matching map cell and row
+  in both directions, and clicking a segment letter switches the active
+  segment. Output cells cycle 0 → 1 → X with arrow-key navigation, sticky
+  header/code column for scrolling, and an edited-dot marker per cell.
+  5-variable mode shows stacked E = 0 / E = 1 tables; the E = 1 plane keeps
+  its mirror hint until first edited. Digit glyphs are now exported from the
+  chip library as `DIGIT_GLYPHS`, and `mintermInputs()` decodes a minterm's
+  binary input pattern (docs/kmap-truth-table-plan.md).
 - 5-variable K-map mode in the decoder design lab: a 4 vars / 5 vars toggle
   adds the classic two stacked 4×4 planes (E = 0 | E = 1, minterm index
   E<<4 | W X Y Z). The E = 1 plane mirrors E = 0 until you edit it, and E = 1

@@ -16,6 +16,11 @@
  * is the classic two stacked 4×4 planes, where E selects the plane and
  * minterm index = E<<4 | W X Y Z. The E = 1 plane mirrors E = 0 until edited
  * and survives 5 → 4 → 5 toggles.
+ *
+ * A datasheet-style truth table (TruthTablePanel, docs/kmap-truth-table-plan.md)
+ * edits the very same store cells from a per-code row view: hovering or
+ * focusing a map cell highlights the matching table row and vice versa —
+ * hoverCode is ephemeral KMapTab state, shared by both views.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -32,6 +37,7 @@ import {
 import { CLASSIC_SEGMENT_EQUATIONS } from '@/data/chips';
 import type { Family, InventoryItem, KMapCell } from '@/lib/logibench/types';
 import { KMAP_SEGS, useKmapStore, type SegKey } from '@/store/kmapStore';
+import TruthTablePanel from '@/components/logibench/TruthTablePanel';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -203,7 +209,8 @@ const bits2 = (v: number): string => v.toString(2).padStart(2, '0');
  * One 4×4 K-map plane. In 5-var mode (`five`) minterm codes are offset by
  * 16·E and labels mention the plane; `compact` shrinks cells so two stacked
  * planes fit on screen together. Cells expose ids/data attrs so arrow keys
- * can move focus between visual neighbours.
+ * can move focus between visual neighbours. `highlightCode` draws an amber
+ * outline on the cell matching the truth-table row under the pointer.
  */
 function PlaneGrid({
   segment,
@@ -213,6 +220,7 @@ function PlaneGrid({
   e,
   five,
   compact,
+  highlightCode,
 }: {
   segment: SegKey;
   cells: KMapCell[];
@@ -221,6 +229,7 @@ function PlaneGrid({
   e: 0 | 1;
   five: boolean;
   compact: boolean;
+  highlightCode?: number | null;
 }) {
   return (
     <div
@@ -266,7 +275,9 @@ function PlaneGrid({
                 data-e={e}
                 onClick={() => onCellClick(code)}
                 aria-label={`minterm m${code}${five ? `, E = ${e}` : ''}, WX=${bits2(wx)}, YZ=${bits2(yz)}, value ${v}. Click to cycle 0, 1, X.`}
-                className={cellClasses(v, edited[code], compact)}
+                className={`${cellClasses(v, edited[code], compact)}${
+                  highlightCode === code ? ' outline-2 outline-amber-500' : ''
+                }`}
               >
                 <span className="pointer-events-none absolute left-1 top-0.5 font-mono text-[10px] text-stone-400">
                   m{code}
@@ -305,11 +316,26 @@ export default function KMapTab() {
   const segment = useKmapStore((s) => s.segment);
   const vars = useKmapStore((s) => s.vars);
   const cells32 = useKmapStore((s) => s.cells[segment]);
+  const allCells = useKmapStore((s) => s.cells);
+  const e1DirtyMap = useKmapStore((s) => s.e1Dirty);
   const setSegmentStore = useKmapStore((s) => s.setSegment);
   const cycleCell = useKmapStore((s) => s.cycleCell);
   const toggleVarsStore = useKmapStore((s) => s.toggleVars);
   const resetSegmentStore = useKmapStore((s) => s.resetSegment);
   const resetAllStore = useKmapStore((s) => s.resetAll);
+
+  /* cross-highlight between the K-map and the truth table (ephemeral) */
+  const [hoverCode, setHoverCode] = useState<number | null>(null);
+
+  /* map-cell hover/focus → truth-table row highlight (event delegation on the map wrapper) */
+  const mapCellFrom = (target: EventTarget | null): number | null => {
+    const btn = (target as HTMLElement).closest('button[data-r]');
+    if (!btn) return null;
+    const r = Number(btn.getAttribute('data-r'));
+    const c = Number(btn.getAttribute('data-c'));
+    const e = Number(btn.getAttribute('data-e') ?? '0');
+    return e * 16 + r * 4 + c;
+  };
 
   /* rehydrate after mount — first render matches SSR, then stored edits land */
   useEffect(() => {
@@ -505,7 +531,8 @@ export default function KMapTab() {
             {' '}Five-variable mode: planes stack for E = 0 and E = 1. The E = 1 plane mirrors
             E = 0 until you edit it, and E = 1 edits survive switching back to 4 variables.
           </>
-        )}
+        )}{' '}
+        The truth table below edits the same cells row by row.
       </p>
 
       {/* K-map + minimized result side by side on desktop */}
@@ -542,7 +569,16 @@ export default function KMapTab() {
                 0 · off
               </span>
             </div>
-            <div className="overflow-x-auto pb-1" onKeyDown={onMapKeyDown}>
+            <div
+              className="overflow-x-auto pb-1"
+              onKeyDown={onMapKeyDown}
+              onMouseOver={(ev) => setHoverCode(mapCellFrom(ev.target))}
+              onMouseLeave={() => setHoverCode(null)}
+              onFocus={(ev) => setHoverCode(mapCellFrom(ev.target))}
+              onBlur={(ev) => {
+                if (!ev.currentTarget.contains(ev.relatedTarget as Node | null)) setHoverCode(null);
+              }}
+            >
               {vars === 4 ? (
                 <PlaneGrid
                   segment={segment}
@@ -552,6 +588,7 @@ export default function KMapTab() {
                   e={0}
                   five={false}
                   compact={false}
+                  highlightCode={hoverCode}
                 />
               ) : (
                 <div className="flex flex-col gap-4">
@@ -565,6 +602,7 @@ export default function KMapTab() {
                       e={0}
                       five
                       compact
+                      highlightCode={hoverCode}
                     />
                   </div>
                   <div>
@@ -577,6 +615,7 @@ export default function KMapTab() {
                       e={1}
                       five
                       compact
+                      highlightCode={hoverCode}
                     />
                   </div>
                 </div>
@@ -632,6 +671,18 @@ export default function KMapTab() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Truth table — datasheet view over the same store cells as the map */}
+      <TruthTablePanel
+        cells={allCells}
+        segment={segment}
+        vars={vars}
+        e1Dirty={e1DirtyMap[segment]}
+        hoverCode={hoverCode}
+        onHover={setHoverCode}
+        onEdit={cycleCell}
+        onSwitchSegment={setSegmentStore}
+      />
 
       {/* Inventory check */}
       <Card className="border-stone-200 bg-white">

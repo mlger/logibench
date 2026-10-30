@@ -18,6 +18,20 @@ export function varCountOf(cells: readonly KMapCell[]): 4 | 5 {
   return cells.length >= 32 ? 5 : 4;
 }
 
+/**
+ * MSB-first input bits of a minterm, matching the store's encoding
+ * (4 vars: W X Y Z; 5 vars: E W X Y Z; bit = n - 1 - i convention).
+ * Used by truth-table views that label each row with its binary input code.
+ */
+export function mintermInputs(code: number, n: 4 | 5): (0 | 1)[] {
+  const out: (0 | 1)[] = [];
+  for (let i = 0; i < n; i++) {
+    const bit = n - 1 - i; // MSB first (W is bit 3 in 4-var; E is bit 4 in 5-var)
+    out.push(((code >> bit) & 1) as 0 | 1);
+  }
+  return out;
+}
+
 /** Gray-code order for 4-variable K-map rows/cols: W X on rows, Y Z on cols. */
 export const KMAP_ROWS = [0b00, 0b01, 0b11, 0b10]; // W X
 export const KMAP_COLS = [0b00, 0b01, 0b11, 0b10]; // Y Z
