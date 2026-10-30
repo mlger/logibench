@@ -143,7 +143,7 @@ export function sopToNandGates(terms: MinTerm[]): GateListEntry[] {
     else if (inCount <= 12) gates.push({ chip: '7400', qty: Math.ceil(inCount / 4), purpose: `${inCount} × 2-in NAND (1st rank)` });
   }
   if (andTerms > 1) {
-    gates.push({ chip: '7400', qty: 1, purpose: `${andTerms}-input NAND (2nd rank — use 7400/7410/7420)` });
+    gates.push({ chip: '7430', qty: 1, purpose: `${andTerms}-input NAND (2nd rank — 7430 when ≤8 inputs, else 7400/7410/7420)` });
   }
   return gates;
 }

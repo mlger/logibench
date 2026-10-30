@@ -129,7 +129,7 @@ export function chipPackage(defId: string): 'DIP8' | 'DIP14' | 'DIP16' {
   // but we need package; duplicate a tiny lookup via static map.
   const known: Record<string, 'DIP8' | 'DIP14' | 'DIP16'> = {
     '7400': 'DIP14', '7402': 'DIP14', '7404': 'DIP14', '7408': 'DIP14', '7432': 'DIP14',
-    '7486': 'DIP14', '7410': 'DIP14', '7411': 'DIP14', '7420': 'DIP14', '7414': 'DIP14',
+    '7486': 'DIP14', '7410': 'DIP14', '7411': 'DIP14', '7420': 'DIP14', '7430': 'DIP14', '7414': 'DIP14',
     '7447': 'DIP16', '7448': 'DIP16', '4511': 'DIP16', '74138': 'DIP16',
     '7490': 'DIP14', '74192': 'DIP16', '74193': 'DIP16', '74390': 'DIP16',
     '74595': 'DIP16', '555': 'DIP8',

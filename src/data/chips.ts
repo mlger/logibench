@@ -216,6 +216,29 @@ export const CHIP_DEFS: ChipDef[] = [
     gotchas: ['Pins 3 and 11 are NC.'],
   },
   {
+    ...quadGate('7430', 'Single 8-input NAND', 'NAND', ['LS', 'HC', 'HCT']),
+    pins: [
+      { num: 1, name: 'A', dir: 'in' }, { num: 2, name: 'B', dir: 'in' },
+      { num: 3, name: 'C', dir: 'in' }, { num: 4, name: 'D', dir: 'in' },
+      { num: 5, name: 'E', dir: 'in' }, { num: 6, name: 'F', dir: 'in' },
+      { num: 7, name: 'GND', dir: 'gnd' },
+      { num: 8, name: 'Y', dir: 'out' }, { num: 9, name: 'NC', dir: 'nc' }, { num: 10, name: 'NC', dir: 'nc' },
+      { num: 11, name: 'G', dir: 'in' }, { num: 12, name: 'H', dir: 'in' }, { num: 13, name: 'NC', dir: 'nc' },
+      { num: 14, name: 'VCC', dir: 'pwr' },
+    ],
+    units: [{ fn: 'NAND', inputs: [1, 2, 3, 4, 5, 6, 11, 12], output: 8 }],
+    datasheets: [
+      TI_LS('SN74LS30'),
+      { vendor: 'Nexperia', doc: '74HC30', rev: 'latest rev', url: 'https://www.nexperia.com/datasheet/74HC30.pdf' },
+    ],
+    gotchas: [
+      'THE wide-input gate: Y is LOW only when ALL 8 inputs are HIGH — one LOW anywhere forces Y HIGH. One chip and one gate delay instead of a 2-level cascade of 2/3/4-input gates.',
+      'PINOUT GOTCHA: A–F run on pins 1–6 but G and H jump to pins 11/12, and pins 9, 10, 13 are NC. Easy to miswire if you assume the 8 inputs run 1–8.',
+      'Classic "all conditions met" gate: 8 status/limit lines in — Y LOW means go. Also the natural 2nd-rank NAND for a ≤8-term SOP (see the K-map tool).',
+      'Fewer than 8 signals? Tie spare inputs HIGH (no-ops for a NAND). LS floats HIGH but tie them anyway; HC floats X and MUST be tied (SCBA004E).',
+    ],
+  },
+  {
     ...quadGate('7414', 'Hex Schmitt-trigger inverter', 'NOT', ['LS', 'HC', 'HCT']),
     id: '7414',
     name: 'Hex Schmitt-trigger inverter',

@@ -15,6 +15,13 @@ are called out inline, and unverified rows are flagged in the app.
 | Floating CMOS inputs (threshold-region conduction, excess current, oscillation, reliability) | TI application report SCBA004E, "Implications of Slow or Floating CMOS Inputs", rev. July 2021 — https://www.ti.com/lit/an/scba004e/scba004e.pdf |
 | LS pull-down sizing (≤2.2 kΩ because IIL −0.4 mA) | Derived from datasheet IIL (calculation, secondary source) |
 
+## Gates
+
+| Chip | Source |
+|---|---|
+| 74LS30 (single 8-input NAND: A–F = 1–6, Y = 8, G = 11, H = 12; NC = 9/10/13) | TI SN74LS30, SDLS099 — Dec 1983 / rev Mar 1988 (scanned; pinout read from the D/N-package TOP VIEW and the ANSI/IEEE logic symbol Y(8)) — https://www.ti.com/lit/ds/symlink/sn74ls30.pdf |
+| 74HC30 (same pinout; HC electricals come from the family table above) | Nexperia 74HC30 — https://www.nexperia.com/datasheet/74HC30.pdf (revision not captured at build time — fetch blocked) |
+
 ## 7-segment decoders
 
 | Chip | Source |
@@ -47,7 +54,9 @@ are called out inline, and unverified rows are flagged in the app.
   0BSD `ivop/7400-logisim` library. No code or graphics were copied.
 - Gate pinouts (7400/02/04/08/32/86, 7410, 7411, 7420) are the standard
   quad/hex layouts; the 7402's mirrored output-first pinout is encoded and
-  called out as a gotcha.
+  called out as a gotcha. The 7430 (single 8-input NAND, non-quad layout) was
+  verified directly against the scanned TI SDLS099 drawing and cross-checked
+  against the Logisim TTL library above (both agree: G/H on 11/12, NC 9/10/13).
 
 ## Known verification gaps (flagged in-app)
 
