@@ -660,7 +660,10 @@ export default function KMapTab() {
               </button>
             ))}
           </div>
+          {/* key remounts the editor on 4↔5 switches so no stale
+              input/error outlives the slot set it was opened for */}
           <VarNameEditor
+            key={vars}
             varNames={varNames}
             vars={vars}
             onRename={setVarNameStore}

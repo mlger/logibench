@@ -96,6 +96,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Variable-name editor chips no longer swallow the click on the next chip
+  during a blur-commit: the inline input (`w-14`) was wider than the chips
+  (~36 px), so committing by blur re-rendered the row mid-click and shifted
+  every chip after it — the browser delivered the click to whatever moved
+  under the pointer. Chips and the input now share a fixed 56 px width, so
+  the row never shifts. Also in the editor: empty input now restores that
+  slot's default name (as the store and the plan intended) instead of
+  raising a validation error — rejected when another slot already carries
+  that default, same as any other duplicate; after an Enter/Escape commit,
+  focus returns to the renamed chip instead of dropping to `<body>`; and
+  the editor (plus any pending error) closes for good on a 4 ↔ 5-variable
+  switch instead of surviving the slot-set change.
 - Map-hover → truth-table cross-highlight landed on the wrong row for half
   the K-map cells: the delegated handler read the cell's grid position
   (`data-r`/`data-c`) as if it were the binary minterm code, but the map lays
