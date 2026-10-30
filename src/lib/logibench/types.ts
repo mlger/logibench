@@ -241,7 +241,10 @@ export interface SimResult {
 
 export interface KMapSpec {
   segment: 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g';
-  /** value for codes 0..15: 0, 1, or 'X' (don't care) */
+  /** input variables: 4 = classic BCD map (W X Y Z); 5 adds the E plane (E W X Y Z) */
+  vars: 4 | 5;
+  /** value for codes 0..15 (vars 4) or 0..31 (vars 5): 0, 1, or 'X' (don't care).
+   *  5-var index = E<<4 | W X Y Z — E is the plane selector (MSB). */
   cells: (0 | 1 | 'X')[];
 }
 

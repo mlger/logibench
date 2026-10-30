@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- 5-variable K-map mode in the decoder design lab: a 4 vars / 5 vars toggle
+  adds the classic two stacked 4×4 planes (E = 0 | E = 1, minterm index
+  E<<4 | W X Y Z). Both planes start as copies of the current 4-var map so E
+  drops out of the minimized SOP until the E = 1 plane is edited; switching
+  back to 4 variables keeps the E = 0 plane. The Quine–McCluskey minimizer,
+  SOP display, term chips, AND-OR / NAND gate lists and inventory check all
+  handle the 5th variable (E′ inverter shows up as 7404 stock).
 - Drag-to-draw wires: press any exposed hole and drag to another hole — a live
   dashed rubber-band in the current wire color follows the pointer, the target
   hole gets a drop ring, and releasing on a hole commits the wire. Releasing

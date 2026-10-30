@@ -7,6 +7,10 @@
  * list (AND–OR and NAND-only) → parts-inventory check. K-map cells cycle
  * 0 → 1 → X on click; the classic per-segment truth values (don't-cares on
  * codes 10–15) come from CLASSIC_SEGMENT_EQUATIONS (plan §4.6).
+ *
+ * Supports 4 variables (W X Y Z) and 5 variables (E W X Y Z): the 5-var map
+ * is the classic two stacked 4×4 planes, where E selects the plane and
+ * minterm index = E<<4 | W X Y Z.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -54,10 +58,15 @@ const CLASSIC_SOP: { seg: SegKey; expr: string }[] = [
   { seg: 'g', expr: 'W + XY′ + X′Y + YZ′' },
 ];
 
+function classicCells(seg: SegKey, vars: 4 | 5): CellVal[] {
+  const c = CLASSIC_SEGMENT_EQUATIONS[seg];
+  return vars === 5 ? [...c, ...c] : [...c];
+}
+
 function classicSpecs(): Record<SegKey, KMapSpec> {
   const out = {} as Record<SegKey, KMapSpec>;
   for (const seg of SEGS) {
-    out[seg] = { segment: seg, cells: [...CLASSIC_SEGMENT_EQUATIONS[seg]] };
+    out[seg] = { segment: seg, vars: 4, cells: classicCells(seg, 4) };
   }
   return out;
 }
@@ -78,9 +87,8 @@ function stockFor(items: InventoryItem[], chip: string): number {
     .reduce((sum, it) => sum + it.qty, 0);
 }
 
-function cellClasses(v: CellVal, isEdited: boolean): string {
-  const base =
-    'relative flex size-16 cursor-pointer items-center justify-center rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600';
+function cellClasses(v: CellVal, isEdited: boolean, compact = false): string {
+  const base = `relative flex ${compact ? 'size-14' : 'size-16'} cursor-pointer items-center justify-center rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600`;
   const byVal =
     v === 1
       ? 'border-amber-600 bg-amber-100 text-amber-900 hover:border-amber-700'
@@ -127,8 +135,86 @@ function GateTable({ entries, empty }: { entries: GateListEntry[]; empty: string
   );
 }
 
+/**
+ * One 4×4 K-map plane. In 5-var mode (`five`) minterm codes are offset by
+ * 16·E and labels mention the plane; `compact` shrinks cells so two stacked
+ * planes fit on screen together.
+ */
+function PlaneGrid({
+  segment,
+  cells,
+  edited,
+  onCellClick,
+  e,
+  five,
+  compact,
+}: {
+  segment: SegKey;
+  cells: CellVal[];
+  edited: boolean[];
+  onCellClick: (code: number) => void;
+  e: 0 | 1;
+  five: boolean;
+  compact: boolean;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={`Karnaugh map for segment ${segment}${five ? `, plane E = ${e}` : ''}, 16 minterms`}
+      className={`grid gap-1.5 ${
+        compact
+          ? 'min-w-[19rem] grid-cols-[2.25rem_repeat(4,3.5rem)]'
+          : 'min-w-[21rem] grid-cols-[2.5rem_repeat(4,4rem)]'
+      }`}
+    >
+      {/* corner label */}
+      <div className="flex items-center justify-center rounded-md bg-stone-50 font-mono text-[10px] leading-tight text-stone-400">
+        <span>WX</span>
+        <span className="mx-0.5 text-stone-300">\</span>
+        <span>YZ</span>
+      </div>
+      {/* column headers (Y Z) */}
+      {KMAP_COLS.map((yz) => (
+        <div
+          key={`col-${yz}`}
+          className="flex items-center justify-center rounded-md bg-stone-50 font-mono text-xs font-medium text-stone-500"
+        >
+          {bits2(yz)}
+        </div>
+      ))}
+      {/* rows (W X) with cells */}
+      {KMAP_ROWS.map((wx) => (
+        <div key={`row-${wx}`} className="col-span-5 grid grid-cols-subgrid">
+          <div className="flex items-center justify-center rounded-md bg-stone-50 font-mono text-xs font-medium text-stone-500">
+            {bits2(wx)}
+          </div>
+          {KMAP_COLS.map((yz) => {
+            const code = e * 16 + wx * 4 + yz;
+            const v = cells[code];
+            return (
+              <button
+                key={`cell-${code}`}
+                type="button"
+                onClick={() => onCellClick(code)}
+                aria-label={`minterm m${code}${five ? `, E = ${e}` : ''}, WX=${bits2(wx)}, YZ=${bits2(yz)}, value ${v}. Click to cycle 0, 1, X.`}
+                className={cellClasses(v, edited[code], compact)}
+              >
+                <span className="pointer-events-none absolute left-1 top-0.5 font-mono text-[10px] text-stone-400">
+                  m{code}
+                </span>
+                <span className="font-mono text-lg font-bold">{v}</span>
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function KMapTab() {
   const [segment, setSegment] = useState<SegKey>('a');
+  const [vars, setVars] = useState<4 | 5>(4);
   const [specs, setSpecs] = useState<Record<SegKey, KMapSpec>>(classicSpecs);
 
   /* ---------- inventory fetch ---------- */
@@ -163,7 +249,7 @@ export default function KMapTab() {
   const gates = useMemo(() => sopToGates(terms), [terms]);
   const nandGates = useMemo(() => sopToNandGates(terms), [terms]);
   const edited = useMemo(
-    () => cells.map((v, i) => v !== CLASSIC_SEGMENT_EQUATIONS[segment][i]),
+    () => cells.map((v, i) => v !== CLASSIC_SEGMENT_EQUATIONS[segment][i % 16]),
     [cells, segment],
   );
   const isClassic = edited.every((e) => !e);
@@ -215,10 +301,30 @@ export default function KMapTab() {
     });
   };
 
+  /** Switch 4 ↔ 5 variables. 4→5 copies each segment's current map onto both
+   *  planes (E drops out of the SOP until the E = 1 plane is edited); 5→4
+   *  keeps the E = 0 plane. Applies to all segments so switching is safe. */
+  const toggleVars = (next: 4 | 5) => {
+    if (next === vars) return;
+    setVars(next);
+    setSpecs((prev) => {
+      const out = {} as Record<SegKey, KMapSpec>;
+      for (const seg of SEGS) {
+        const cur = prev[seg].cells;
+        out[seg] = {
+          segment: seg,
+          vars: next,
+          cells: next === 5 ? [...cur, ...cur] : cur.slice(0, 16),
+        };
+      }
+      return out;
+    });
+  };
+
   const resetSegment = () => {
     setSpecs((prev) => ({
       ...prev,
-      [segment]: { segment, cells: [...CLASSIC_SEGMENT_EQUATIONS[segment]] },
+      [segment]: { segment, vars, cells: classicCells(segment, vars) },
     }));
   };
 
@@ -226,30 +332,53 @@ export default function KMapTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Header row: segment selector + reset + explainer */}
+      {/* Header row: segment selector + variable count + reset + explainer */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div role="group" aria-label="Segment selector" className="flex flex-wrap gap-1.5">
-          {SEGS.map((s) => {
-            const active = s === segment;
-            return (
-              <Button
-                key={s}
+        <div className="flex flex-wrap items-center gap-3">
+          <div role="group" aria-label="Segment selector" className="flex flex-wrap gap-1.5">
+            {SEGS.map((s) => {
+              const active = s === segment;
+              return (
+                <Button
+                  key={s}
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-pressed={active}
+                  aria-label={`Segment ${s}`}
+                  onClick={() => setSegment(s)}
+                  className={`size-11 cursor-pointer font-mono text-base font-semibold ${
+                    active
+                      ? 'border-amber-600 bg-amber-600 text-white hover:bg-amber-700 hover:text-white'
+                      : 'text-stone-600 hover:border-amber-500 hover:text-amber-700'
+                  }`}
+                >
+                  {s}
+                </Button>
+              );
+            })}
+          </div>
+          <div
+            role="group"
+            aria-label="Input variables"
+            className="flex overflow-hidden rounded-md border border-stone-300"
+          >
+            {([4, 5] as const).map((n) => (
+              <button
+                key={n}
                 type="button"
-                variant="outline"
-                size="icon"
-                aria-pressed={active}
-                aria-label={`Segment ${s}`}
-                onClick={() => setSegment(s)}
-                className={`size-11 cursor-pointer font-mono text-base font-semibold ${
-                  active
-                    ? 'border-amber-600 bg-amber-600 text-white hover:bg-amber-700 hover:text-white'
-                    : 'text-stone-600 hover:border-amber-500 hover:text-amber-700'
+                aria-pressed={vars === n}
+                onClick={() => toggleVars(n)}
+                className={`cursor-pointer px-3 py-1.5 text-sm font-medium transition-colors ${
+                  vars === n
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-white text-stone-600 hover:bg-stone-50 hover:text-amber-700'
                 }`}
               >
-                {s}
-              </Button>
-            );
-          })}
+                {n} vars
+              </button>
+            ))}
+          </div>
         </div>
         <Button
           type="button"
@@ -267,6 +396,12 @@ export default function KMapTab() {
         Active-HIGH (common-cathode) segment outputs. Click any K-map cell to cycle{' '}
         <span className="font-mono font-medium text-stone-700">0 → 1 → X</span> (don&apos;t-care).
         Codes 10–15 default to X.
+        {vars === 5 && (
+          <>
+            {' '}Five-variable mode: the E = 1 plane starts as a copy of E = 0, so E drops out of
+            the SOP until you edit it — switching back to 4 variables keeps the E = 0 plane.
+          </>
+        )}
       </p>
 
       {/* K-map + minimized result side by side on desktop */}
@@ -274,7 +409,9 @@ export default function KMapTab() {
         <Card className="border-stone-200 bg-white">
           <CardHeader>
             <CardTitle className={HDR}>Karnaugh map — segment {segment}</CardTitle>
-            <CardDescription>Rows = W X · Columns = Y Z · Gray order</CardDescription>
+            <CardDescription>
+              Rows = W X · Columns = Y Z{vars === 5 ? ' · Planes = E (0 | 1)' : ''} · Gray order
+            </CardDescription>
             <CardAction>
               {!isClassic && (
                 <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700">
@@ -302,53 +439,44 @@ export default function KMapTab() {
               </span>
             </div>
             <div className="overflow-x-auto pb-1">
-              <div
-                role="group"
-                aria-label={`Karnaugh map for segment ${segment}, 16 minterms`}
-                className="grid min-w-[21rem] grid-cols-[2.5rem_repeat(4,4rem)] gap-1.5"
-              >
-                {/* corner label */}
-                <div className="flex items-center justify-center rounded-md bg-stone-50 font-mono text-[10px] leading-tight text-stone-400">
-                  <span>WX</span>
-                  <span className="mx-0.5 text-stone-300">\</span>
-                  <span>YZ</span>
+              {vars === 4 ? (
+                <PlaneGrid
+                  segment={segment}
+                  cells={cells}
+                  edited={edited}
+                  onCellClick={handleCellClick}
+                  e={0}
+                  five={false}
+                  compact={false}
+                />
+              ) : (
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <p className="mb-1.5 font-mono text-xs font-semibold text-stone-600">E = 0</p>
+                    <PlaneGrid
+                      segment={segment}
+                      cells={cells}
+                      edited={edited}
+                      onCellClick={handleCellClick}
+                      e={0}
+                      five
+                      compact
+                    />
+                  </div>
+                  <div>
+                    <p className="mb-1.5 font-mono text-xs font-semibold text-stone-600">E = 1</p>
+                    <PlaneGrid
+                      segment={segment}
+                      cells={cells}
+                      edited={edited}
+                      onCellClick={handleCellClick}
+                      e={1}
+                      five
+                      compact
+                    />
+                  </div>
                 </div>
-                {/* column headers (Y Z) */}
-                {KMAP_COLS.map((yz) => (
-                  <div
-                    key={`col-${yz}`}
-                    className="flex items-center justify-center rounded-md bg-stone-50 font-mono text-xs font-medium text-stone-500"
-                  >
-                    {bits2(yz)}
-                  </div>
-                ))}
-                {/* rows (W X) with cells */}
-                {KMAP_ROWS.map((wx) => (
-                  <div key={`row-${wx}`} className="col-span-5 grid grid-cols-subgrid">
-                    <div className="flex items-center justify-center rounded-md bg-stone-50 font-mono text-xs font-medium text-stone-500">
-                      {bits2(wx)}
-                    </div>
-                    {KMAP_COLS.map((yz) => {
-                      const code = wx * 4 + yz;
-                      const v = cells[code];
-                      return (
-                        <button
-                          key={`cell-${code}`}
-                          type="button"
-                          onClick={() => handleCellClick(code)}
-                          aria-label={`minterm m${code}, WX=${bits2(wx)}, YZ=${bits2(yz)}, value ${v}. Click to cycle 0, 1, X.`}
-                          className={cellClasses(v, edited[code])}
-                        >
-                          <span className="pointer-events-none absolute left-1 top-0.5 font-mono text-[10px] text-stone-400">
-                            m{code}
-                          </span>
-                          <span className="font-mono text-lg font-bold">{v}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
+              )}
             </div>
           </CardContent>
         </Card>

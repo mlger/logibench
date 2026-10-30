@@ -3,9 +3,20 @@ import type { KMapSpec, MinTerm } from './types';
 /**
  * K-map / Quine–McCluskey minimization for the decoder design lab (plan §3.3).
  * 4 variables: W X Y Z (W = MSB = D, … Z = LSB = A in BCD pin terms).
+ * 5 variables: E W X Y Z — E is the new MSB and selects the map plane
+ * (minterm index = E<<4 | W X Y Z), the classic two-stacked-4×4-planes layout.
  */
 
-const VARS = ['W', 'X', 'Y', 'Z'] as const;
+/** Variable names, MSB first, per variable count. */
+export const VARS_BY_COUNT: { 4: readonly string[]; 5: readonly string[] } = {
+  4: ['W', 'X', 'Y', 'Z'],
+  5: ['E', 'W', 'X', 'Y', 'Z'],
+};
+
+/** Infer the variable count from a cells array (16 → 4 vars, 32 → 5 vars). */
+export function varCountOf(cells: readonly (0 | 1 | 'X')[]): 4 | 5 {
+  return cells.length >= 32 ? 5 : 4;
+}
 
 /** Gray-code order for 4-variable K-map rows/cols: W X on rows, Y Z on cols. */
 export const KMAP_ROWS = [0b00, 0b01, 0b11, 0b10]; // W X
@@ -15,16 +26,17 @@ function coveredTerm(term: number, mask: number, code: number): boolean {
   return (code & ~mask) === (term & ~mask);
 }
 
-/** All implicants covering only allowed cells. */
-function allImplicants(allowed: number[]): { term: number; mask: number }[] {
+/** All implicants covering only allowed cells (n = 4 or 5 variables). */
+function allImplicants(allowed: number[], n: 4 | 5): { term: number; mask: number }[] {
   const out: { term: number; mask: number }[] = [];
+  const size = 1 << n;
   // implicant = (base, mask): covers every code whose masked projection == base
-  for (let base = 0; base < 16; base++) {
-    for (let mask = 0; mask < 16; mask++) {
+  for (let base = 0; base < size; base++) {
+    for (let mask = 0; mask < size; mask++) {
       if ((base & mask) !== 0) continue;
       const covers: number[] = [];
       let ok = true;
-      for (let bit = 0; bit < 16; bit++) {
+      for (let bit = 0; bit < size; bit++) {
         if ((bit & ~mask) === base) {
           covers.push(bit);
           if (!allowed.includes(bit)) { ok = false; break; }
@@ -45,6 +57,7 @@ function allImplicants(allowed: number[]): { term: number; mask: number }[] {
 
 /** Greedy exact-ish cover: prefer largest implicants (classic QM prime selection). */
 export function minimize(cells: (0 | 1 | 'X')[]): MinTerm[] {
+  const n = varCountOf(cells);
   const ones: number[] = [];
   const dcs: number[] = [];
   cells.forEach((v, i) => {
@@ -55,7 +68,7 @@ export function minimize(cells: (0 | 1 | 'X')[]): MinTerm[] {
   const allowed = [...ones, ...dcs];
   // Prefer LARGER groups first: more eliminated variables (popcount of mask)
   // = fewer literals per term. (Single-cell implicants have mask 0 → last.)
-  const imps = allImplicants(allowed)
+  const imps = allImplicants(allowed, n)
     .map((im) => ({ ...im, size: popcount(im.mask) }))
     .sort((a, b) => b.size - a.size);
 
@@ -77,7 +90,7 @@ export function minimize(cells: (0 | 1 | 'X')[]): MinTerm[] {
     const others = chosen.filter((_, j) => j !== i);
     return ones.some((m) => !others.some((o) => coveredTerm(o.term, o.mask, m)));
   });
-  return (essential.length ? essential : chosen).map(toMinTerm);
+  return (essential.length ? essential : chosen).map((im) => toMinTerm(im, n));
 }
 
 function popcount(n: number): number {
@@ -86,13 +99,14 @@ function popcount(n: number): number {
   return c;
 }
 
-export function toMinTerm(im: { term: number; mask: number }): MinTerm {
+export function toMinTerm(im: { term: number; mask: number }, n: 4 | 5 = 4): MinTerm {
+  const vars = VARS_BY_COUNT[n];
   const parts: string[] = [];
-  for (let i = 0; i < 4; i++) {
-    const bit = 3 - i; // W is bit 3
+  for (let i = 0; i < n; i++) {
+    const bit = n - 1 - i; // MSB first (W is bit 3 in 4-var; E is bit 4 in 5-var)
     if ((im.mask >> bit) & 1) continue;
     const v = (im.term >> bit) & 1;
-    parts.push(v ? VARS[i] : `${VARS[i]}′`);
+    parts.push(v ? vars[i] : `${vars[i]}′`);
   }
   return {
     cover: [],
