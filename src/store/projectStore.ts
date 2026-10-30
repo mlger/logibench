@@ -4,7 +4,9 @@ import { create } from 'zustand';
 import type {
   HoleRef, PartInstance, PartType, Project, SimResult, Wire,
 } from '@/lib/logibench/types';
-import { checkPlacement, pinCount, sameHole } from '@/lib/logibench/geometry';
+import {
+  ALL_ROWS, BOARD_SPECS, checkPlacement, holeKey, pinCount, sameHole,
+} from '@/lib/logibench/geometry';
 import { buildNetlist } from '@/lib/logibench/netlist';
 import { Simulator } from '@/lib/logibench/sim';
 import { emptyProject, demo7447, demo4511 } from '@/lib/logibench/demo';
@@ -53,6 +55,8 @@ export interface EditorState {
   select: (sel: Selection) => void;
   deleteSelection: () => void;
   updatePart: (id: string, props: Partial<PartInstance['props']>) => void;
+  /** drag-and-drop: move an existing part so its first pin lands on `anchor` */
+  movePart: (id: string, anchor: HoleRef) => void;
   rotateTwoPin?: undefined;
 
   toggleSwitch: (id: string) => void;
@@ -156,7 +160,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       const part: PartInstance = {
         id: nextId(type), type, defId,
         pins: type === 'chip' ? check.holes : check.holes,
-        props: type === 'seg7' ? { polarity: 'CA', color: 'red' } : {},
+        props: type === 'seg7' ? { polarity: 'CA', color: 'red', ...st.placement.preset } : {},
       };
       get().commit((p) => { p.parts.push(part); });
       set({ placement: null, selection: { kind: 'part', id: part.id } });
@@ -231,6 +235,50 @@ export const useEditor = create<EditorState>((set, get) => ({
       const part = p.parts.find((x) => x.id === id);
       if (part) part.props = { ...part.props, ...props };
     });
+  },
+
+  movePart: (id, anchor) => {
+    const st = get();
+    const project = st.project;
+    const part = project.parts.find((x) => x.id === id);
+    if (!part) return;
+    const board = project.boards[0];
+
+    // chips / displays: re-anchor to the dropped column (straddles the channel)
+    if (part.type === 'chip' || part.type === 'seg7') {
+      const others = project.parts.filter((x) => x.id !== id);
+      const check = checkPlacement(board.kind, others, part.type, part.defId, anchor.col);
+      if (!check.ok || !check.holes) return;
+      get().commit((p) => {
+        const i = p.parts.findIndex((x) => x.id === id);
+        if (i >= 0) p.parts[i].pins = check.holes!;
+      });
+      set({ selection: { kind: 'part', id } });
+      return;
+    }
+
+    // two/3-pin parts: translate the whole pin vector by the anchor delta
+    const dc = anchor.col - part.pins[0].col;
+    const dr = ALL_ROWS.indexOf(anchor.row) - ALL_ROWS.indexOf(part.pins[0].row);
+    if (dc === 0 && dr === 0) return;
+    const cols = BOARD_SPECS[board.kind].cols;
+    const occ = new Set(
+      project.parts.filter((x) => x.id !== id).flatMap((x) => x.pins.map((h) => holeKey(h))),
+    );
+    const newPins: HoleRef[] = [];
+    for (const h of part.pins) {
+      const col = h.col + dc;
+      const ri = ALL_ROWS.indexOf(h.row) + dr;
+      if (col < 1 || col > cols || ri < 0 || ri >= ALL_ROWS.length) return;
+      const row = ALL_ROWS[ri];
+      if (occ.has(holeKey({ board: h.board, col, row }))) return;
+      newPins.push({ board: h.board, col, row });
+    }
+    get().commit((p) => {
+      const i = p.parts.findIndex((x) => x.id === id);
+      if (i >= 0) p.parts[i].pins = newPins;
+    });
+    set({ selection: { kind: 'part', id } });
   },
 
   toggleSwitch: (id) => {

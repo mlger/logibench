@@ -65,6 +65,34 @@ export function isRailRow(row: RowName): boolean {
   return (RAIL_ROWS as string[]).includes(row);
 }
 
+/**
+ * Inverse mapping: board-space coordinates (px, after pan/zoom removal) to the
+ * nearest tie-point hole. Returns null when the point is off the board or not
+ * close to any hole row. Used by drag-and-drop drop targeting.
+ */
+export function nearestHole(
+  kind: Breadboard['kind'],
+  x: number,
+  y: number,
+  board = 'main',
+): HoleRef | null {
+  const d = boardDims(kind);
+  const spec = BOARD_SPECS[kind];
+  const col = Math.round((x - d.padX) / PITCH) + 1;
+  if (col < 1 || col > spec.cols) return null;
+  let bestRow: RowName = ALL_ROWS[0];
+  let bestDist = Infinity;
+  for (const row of ALL_ROWS) {
+    const dist = Math.abs(rowY(kind, row) - y);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestRow = row;
+    }
+  }
+  if (bestDist > PITCH * 0.75) return null;
+  return { board, col, row: bestRow };
+}
+
 /** Which rail line does a chip DIP pin column sit near? (for quick auto-wiring UI hints) */
 export function holeKey(h: HoleRef): string {
   return `${h.board}:${h.col}:${h.row}`;

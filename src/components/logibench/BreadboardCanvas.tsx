@@ -1,12 +1,14 @@
 'use client';
 
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HoleRef, PartInstance, Project, SimResult } from '@/lib/logibench/types';
 import {
   BOARD_SPECS, PITCH, boardDims, colX, chipPackage, checkPlacement, holeKey,
-  rowY,
+  nearestHole, parseHoleKey, partLabel, rowY,
 } from '@/lib/logibench/geometry';
-import { netHolesOf } from '@/store/projectStore';
+import { netHolesOf, useEditor } from '@/store/projectStore';
+import { useDnd } from '@/store/dnd';
+import { beginDragTracking } from './drag';
 import { getChipDef } from '@/data/chips';
 import { resistorBands } from '@/lib/logibench/eseries';
 import type { PlacementState, Selection } from '@/store/projectStore';
@@ -60,6 +62,57 @@ function CanvasInner(props: Props & { initialScale: number }) {
   const svgRef = props.svgRef ?? svgRefInt;
   const dragRef = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
+
+  /* ---------- drag & drop (palette → board, part → new spot) ---------- */
+  // payload is identity-stable per drag session — no re-render on pointer-move
+  const dndPayload = useDnd((s) => s.payload);
+  const [dndHoverKey, setDndHoverKey] = useState<string | null>(null);
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  });
+
+  useEffect(() => {
+    if (!dndPayload) return;
+    const clientToHole = (cx: number, cy: number) => {
+      const svg = svgRef.current;
+      if (!svg) return null;
+      const rect = svg.getBoundingClientRect();
+      const v = viewRef.current;
+      return nearestHole(board.kind, (cx - rect.left - v.x) / v.scale, (cy - rect.top - v.y) / v.scale, board.id);
+    };
+    const onMove = (ev: PointerEvent) => {
+      const h = clientToHole(ev.clientX, ev.clientY);
+      const k = h ? holeKey(h) : null;
+      setDndHoverKey((prev) => (prev === k ? prev : k));
+    };
+    const onUp = (ev: PointerEvent) => {
+      const d = useDnd.getState().payload;
+      useDnd.getState().cancel();
+      setDndHoverKey(null);
+      if (!d) return;
+      const hole = clientToHole(ev.clientX, ev.clientY);
+      if (!hole) return;
+      if (d.source === 'palette') {
+        useEditor.getState().startPlacement(d.type, d.defId, d.preset);
+        useEditor.getState().placeAt(hole);
+      } else if (d.partId) {
+        useEditor.getState().movePart(d.partId, hole);
+      }
+    };
+    const onCancel = () => {
+      useDnd.getState().cancel();
+      setDndHoverKey(null);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+    };
+  }, [dndPayload !== null, board.kind, board.id]);
 
   const cols = BOARD_SPECS[board.kind].cols;
 
@@ -139,16 +192,25 @@ function CanvasInner(props: Props & { initialScale: number }) {
     props.onHoleHover(null);
   }, [props]);
 
-  /* ---------- ghost placement validity ---------- */
+  /* ---------- ghost placement validity (click flow + drag & drop) ---------- */
   const ghost = useMemo(() => {
-    if (!placement || !hoverKey) return null;
-    const col = Number(hoverKey.split(':')[1]);
-    if (placement.type === 'chip' || placement.type === 'seg7') {
-      const check = checkPlacement(board.kind, project.parts, placement.type, placement.defId, col);
-      return { kind: 'multi' as const, col, ok: check.ok, spans: placement.type === 'chip' ? chipPackage(placement.defId ?? '7400') === 'DIP16' ? 8 : chipPackage(placement.defId ?? '7400') === 'DIP14' ? 7 : 4 : 5 };
+    const isDnd = dndPayload !== null;
+    const type = isDnd ? dndPayload.type : placement?.type;
+    const defId = isDnd ? dndPayload.defId : placement?.defId;
+    const hk = isDnd ? dndHoverKey : hoverKey;
+    if (!type || !hk) return null;
+    const col = Number(hk.split(':')[1]);
+    if (Number.isNaN(col)) return null;
+    if (type === 'chip' || type === 'seg7') {
+      const partsForCheck = isDnd && dndPayload.source === 'board' && dndPayload.partId
+        ? project.parts.filter((p) => p.id !== dndPayload.partId)
+        : project.parts;
+      const check = checkPlacement(board.kind, partsForCheck, type, defId, col);
+      const pkg = type === 'chip' ? chipPackage(defId ?? '7400') : null;
+      return { kind: 'multi' as const, col, ok: check.ok, spans: type === 'seg7' ? 5 : pkg === 'DIP16' ? 8 : pkg === 'DIP14' ? 7 : 4 };
     }
     return { kind: 'two' as const, col, ok: true, spans: 1 };
-  }, [placement, hoverKey, board.kind, project.parts]);
+  }, [placement, hoverKey, dndPayload, dndHoverKey, board.kind, project.parts]);
 
   const rows = ['+T', '-T', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', '+B', '-B'] as const;
 
@@ -256,21 +318,35 @@ function CanvasInner(props: Props & { initialScale: number }) {
             );
           })}
 
-          {/* parts */}
+          {/* parts — the wrapper g turns a press on a placed part into a move-drag */}
           {project.parts.map((part) => (
-            <PartGraphic
+            <g
               key={part.id}
-              part={part}
-              pos={pos}
-              boardKind={board.kind}
-              selected={selection?.kind === 'part' && selection.id === part.id}
-              sim={running ? simResult : null}
-              liveClosed={liveSwitches[part.id] ?? (part.type === 'switch' || part.type === 'button' ? part.props.closed ?? false : false)}
-              onSelect={() => props.onPartClick(part.id)}
-              onSwitchToggle={props.onSwitchToggle}
-              onButtonPress={props.onButtonPress}
-              interactive={running}
-            />
+              onPointerDown={(e) => {
+                if (running) return; // simulate mode: switches/buttons handle their own presses
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
+                e.stopPropagation(); // don't pan the board
+                beginDragTracking(
+                  { source: 'board', type: part.type, defId: part.defId, partId: part.id, label: partLabel(part) },
+                  e,
+                );
+              }}
+              style={{ touchAction: 'none' }}
+            >
+              <PartGraphic
+                key={part.id}
+                part={part}
+                pos={pos}
+                boardKind={board.kind}
+                selected={selection?.kind === 'part' && selection.id === part.id}
+                sim={running ? simResult : null}
+                liveClosed={liveSwitches[part.id] ?? (part.type === 'switch' || part.type === 'button' ? part.props.closed ?? false : false)}
+                onSelect={() => props.onPartClick(part.id)}
+                onSwitchToggle={props.onSwitchToggle}
+                onButtonPress={props.onButtonPress}
+                interactive={running}
+              />
+            </g>
           ))}
 
           {/* ghost preview */}
@@ -295,6 +371,11 @@ function CanvasInner(props: Props & { initialScale: number }) {
               stroke="#d97706" strokeWidth={2.5} strokeDasharray="6 4" opacity={0.8}
             />
           )}
+          {/* drop target ring while dragging a two-pin part over a hole */}
+          {dndPayload && dndHoverKey && dndPayload.type !== 'chip' && dndPayload.type !== 'seg7' && (() => {
+            const p = pos(parseHoleKey(dndHoverKey));
+            return <circle cx={p.x} cy={p.y} r={8} fill="none" stroke="#d97706" strokeWidth={2} strokeDasharray="3 2" pointerEvents="none" />;
+          })()}
         </g>
       </svg>
 
@@ -531,7 +612,7 @@ const PartGraphic = memo(function PartGraphic({
         role="button"
         tabIndex={0}
         aria-label={`Pushbutton${interactive ? ' — hold Enter/space to press' : ''}`}
-        onPointerDown={(e) => { e.stopPropagation(); if (interactive) onButtonPress(part.id, true); }}
+        onPointerDown={(e) => { if (interactive) { e.stopPropagation(); onButtonPress(part.id, true); } }}
         onPointerUp={() => onButtonPress(part.id, false)}
         onPointerLeave={() => onButtonPress(part.id, false)}
         onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && interactive) { e.stopPropagation(); onButtonPress(part.id, true); } }}

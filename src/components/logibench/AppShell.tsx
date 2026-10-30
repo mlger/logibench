@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HoleRef } from '@/lib/logibench/types';
 import { useEditor } from '@/store/projectStore';
+import { useDnd } from '@/store/dnd';
 import BreadboardCanvas from './BreadboardCanvas';
 import Palette from './Palette';
 import Inspector from './Inspector';
@@ -15,6 +16,27 @@ import { Input } from '@/components/ui/input';
 import { Play, Pause, Undo2, Redo2, Save, FolderOpen, Download, Upload, Trash2, FlaskConical, Cpu } from 'lucide-react';
 
 type Tab = 'bench' | 'reference' | 'kmap' | 'inventory';
+
+/** Floating label that follows the pointer while a part is being dragged. */
+function DragGhost() {
+  const payload = useDnd((s) => s.payload);
+  const x = useDnd((s) => s.x);
+  const y = useDnd((s) => s.y);
+  return (
+    <>
+      <span className="sr-only" aria-live="polite">{payload ? `Dragging ${payload.label}` : ''}</span>
+      {payload && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed z-50 -translate-y-1/2 rounded-md border border-stone-700 bg-stone-900/95 px-2 py-1 font-mono text-[10px] font-bold text-amber-300 shadow-lg"
+          style={{ left: x + 14, top: y }}
+        >
+          {payload.label}
+        </div>
+      )}
+    </>
+  );
+}
 
 export default function AppShell() {
   const project = useEditor((s) => s.project);
@@ -133,6 +155,7 @@ export default function AppShell() {
 
   return (
     <div className="flex min-h-screen flex-col bg-stone-100">
+      <DragGhost />
       {/* top bar */}
       <header className="sticky top-0 z-20 border-b border-stone-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-2 px-3 py-2">

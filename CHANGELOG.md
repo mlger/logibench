@@ -7,6 +7,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Drag-and-drop for parts: drag any palette item (chips, displays, discrete
+  parts) onto the board to place it — chips/displays drop in one motion,
+  two-pin parts drop their first pin then take a click for the second.
+  Dragging a placed part moves it (validated, undoable). Pointer-based, so it
+  works with mouse and touch; click-to-place remains as a fallback. Live
+  drop-target ghost shows green/red validity, floating label follows the
+  pointer, drop is cancelled when released off-board.
 - 7430 single 8-input NAND gate to the chip library (DIP14; inputs A–F = 1–6,
   G/H = 11/12, Y = 8, NC = 9/10/13; TI SDLS099 verified, Logisim TTL library
   cross-checked).
@@ -18,6 +25,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- 5161AS (common-cathode) placed from the palette came out as a common-anode
+  part: `placeAt` ignored the placement preset for 7-segment displays; it is
+  now applied.
 - ERC `ls-to-hc` false positive: HCT inputs have TTL-level thresholds, so an
   LS output driving HCT no longer warns; Lab 2's 4511 is placed as HCT.
 
