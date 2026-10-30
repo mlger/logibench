@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model InventoryItem {
+  id         String   @id @default(cuid())
+  partNumber String
+  base       String
+  family     String
+  package    String
+  qty        Int      @default(0)
+  condition  String   @default("new")
+  location   String?
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([base])
+}
+
+model SavedProject {
+  id        String   @id @default(cuid())
+  name      String
+  data      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

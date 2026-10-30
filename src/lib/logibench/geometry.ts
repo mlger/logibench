@@ -1,0 +1,227 @@
+import type { Breadboard, HoleRef, PartInstance, RowName } from './types';
+
+/**
+ * Breadboard geometry — single source of truth for both the SVG canvas and
+ * placement validation. 0.1" grid rendered at PITCH px.
+ */
+
+export const PITCH = 16;
+
+export const BOARD_SPECS: Record<
+  Breadboard['kind'],
+  { cols: number; label: string; tiePoints: number }
+> = {
+  half400: { cols: 30, label: 'Half-size (400 pt)', tiePoints: 400 },
+  full830: { cols: 63, label: 'Full-size (830 pt)', tiePoints: 830 },
+};
+
+const ROWS_TOP: RowName[] = ['a', 'b', 'c', 'd', 'e'];
+const ROWS_BOT: RowName[] = ['f', 'g', 'h', 'i', 'j'];
+export const RAIL_ROWS: RowName[] = ['+T', '-T', '+B', '-B'];
+export const ALL_ROWS: RowName[] = [...RAIL_ROWS, ...ROWS_TOP, ...ROWS_BOT];
+
+/** Y offset of the channel between rows e and f, in px. */
+export const CHANNEL_GAP = 12;
+
+export function boardDims(kind: Breadboard['kind']) {
+  const cols = BOARD_SPECS[kind].cols;
+  const padX = 30;
+  const padTop = 16;
+  const padBottom = 16;
+  // rails: +T, -T ; gap 14 ; a..e ; channel ; f..j ; gap 14 ; +B, -B
+  const yPlusT = padTop;
+  const yMinusT = padTop + PITCH;
+  const yA = padTop + PITCH * 2 + 14;
+  const yF = yA + PITCH * 5 + CHANNEL_GAP;
+  const yPlusB = yF + PITCH * 5 + 14;
+  const yMinusB = yPlusB + PITCH;
+  const width = padX + cols * PITCH + 18;
+  const height = yMinusB + PITCH - 6 + padBottom;
+  return { cols, padX, padTop, width, height, yPlusT, yMinusT, yA, yF, yPlusB, yMinusB };
+}
+
+export function rowY(kind: Breadboard['kind'], row: RowName): number {
+  const d = boardDims(kind);
+  switch (row) {
+    case '+T': return d.yPlusT;
+    case '-T': return d.yMinusT;
+    case '+B': return d.yPlusB;
+    case '-B': return d.yMinusB;
+    default: {
+      const topRows: RowName[] = ['a', 'b', 'c', 'd', 'e'];
+      const ti = topRows.indexOf(row);
+      if (ti >= 0) return d.yA + ti * PITCH;
+      const botRows: RowName[] = ['f', 'g', 'h', 'i', 'j'];
+      return d.yF + (botRows.indexOf(row)) * PITCH;
+    }
+  }
+}
+
+export function colX(kind: Breadboard['kind'], col: number): number {
+  return boardDims(kind).padX + (col - 1) * PITCH;
+}
+
+export function isRailRow(row: RowName): boolean {
+  return (RAIL_ROWS as string[]).includes(row);
+}
+
+/** Which rail line does a chip DIP pin column sit near? (for quick auto-wiring UI hints) */
+export function holeKey(h: HoleRef): string {
+  return `${h.board}:${h.col}:${h.row}`;
+}
+
+export function parseHoleKey(key: string): HoleRef {
+  const [board, col, row] = key.split(':');
+  return { board, col: Number(col), row: row as RowName };
+}
+
+export function sameHole(a: HoleRef, b: HoleRef): boolean {
+  return a.board === b.board && a.col === b.col && a.row === b.row;
+}
+
+/* ---------------- Footprints ---------------- */
+
+export interface Footprint {
+  /** pins in order: pin number -> hole offset */
+  spans: number; // columns occupied
+  pinAt: (col0: number, pin: number) => HoleRef | null;
+}
+
+export function chipFootprint(pkg: 'DIP8' | 'DIP14' | 'DIP16'): Footprint {
+  const perSide = pkg === 'DIP8' ? 4 : pkg === 'DIP14' ? 7 : 8;
+  return {
+    spans: perSide,
+    pinAt(col0: number, pin: number) {
+      if (pin >= 1 && pin <= perSide) return { board: 'main', col: col0 + pin - 1, row: 'e' };
+      if (pin > perSide && pin <= perSide * 2)
+        return { board: 'main', col: col0 + perSide * 2 - pin, row: 'f' };
+      return null;
+    },
+  };
+}
+
+export function seg7Footprint(): Footprint {
+  return {
+    spans: 5,
+    pinAt(col0: number, pin: number) {
+      if (pin >= 1 && pin <= 5) return { board: 'main', col: col0 + pin - 1, row: 'e' };
+      if (pin >= 6 && pin <= 10) return { board: 'main', col: col0 + 10 - pin, row: 'f' };
+      return null;
+    },
+  };
+}
+
+export function twoPinFootprint(): Footprint {
+  return { spans: 1, pinAt: () => null }; // free placement, holes chosen explicitly
+}
+
+export function partFootprint(part: PartInstance): Footprint {
+  if (part.type === 'chip' && part.defId) {
+    const pkg = chipPackage(part.defId);
+    return chipFootprint(pkg);
+  }
+  if (part.type === 'seg7') return seg7Footprint();
+  return twoPinFootprint();
+}
+
+export function chipPackage(defId: string): 'DIP8' | 'DIP14' | 'DIP16' {
+  // imported lazily to avoid cycle: chips.ts has no geometry import
+  // but we need package; duplicate a tiny lookup via static map.
+  const known: Record<string, 'DIP8' | 'DIP14' | 'DIP16'> = {
+    '7400': 'DIP14', '7402': 'DIP14', '7404': 'DIP14', '7408': 'DIP14', '7432': 'DIP14',
+    '7486': 'DIP14', '7410': 'DIP14', '7411': 'DIP14', '7420': 'DIP14', '7414': 'DIP14',
+    '7447': 'DIP16', '7448': 'DIP16', '4511': 'DIP16', '74138': 'DIP16',
+    '7490': 'DIP14', '74192': 'DIP16', '74193': 'DIP16', '74390': 'DIP16',
+    '74595': 'DIP16', '555': 'DIP8',
+  };
+  return known[defId] ?? 'DIP14';
+}
+
+/** Pin count per part type (for placement hole-picking flow). */
+export function pinCount(part: Omit<PartInstance, 'pins' | 'id'>): number {
+  switch (part.type) {
+    case 'chip': {
+      const pkg = chipPackage(part.defId ?? '7400');
+      return pkg === 'DIP8' ? 8 : pkg === 'DIP14' ? 14 : 16;
+    }
+    case 'seg7': return 10;
+    case 'clock555': return 3;
+    case 'supply': return 2;
+    default: return 2;
+  }
+}
+
+/* ---------------- Placement validation ---------------- */
+
+export interface Occupancy {
+  /** holeKey -> partId */
+  map: Map<string, string>;
+}
+
+export function buildOccupancy(parts: PartInstance[]): Occupancy {
+  const map = new Map<string, string>();
+  for (const p of parts) {
+    for (const h of p.pins) {
+      const k = holeKey(h);
+      map.set(k, p.id);
+    }
+  }
+  return { map };
+}
+
+export interface PlacementCheck {
+  ok: boolean
+  reason?: string;
+  holes?: HoleRef[];
+}
+
+/**
+ * Validate a multi-pin part placement anchored at top-left column col0.
+ * Chip/display must straddle the channel (pins land in rows e and f) and all
+ * holes must be free.
+ */
+export function checkPlacement(
+  kind: Breadboard['kind'],
+  parts: PartInstance[],
+  type: PartInstance['type'],
+  defId: string | undefined,
+  col0: number,
+): PlacementCheck {
+  const spec = BOARD_SPECS[kind];
+  let fp: Footprint;
+  if (type === 'chip' && defId) fp = chipFootprint(chipPackage(defId));
+  else if (type === 'seg7') fp = seg7Footprint();
+  else return { ok: true };
+
+  if (col0 < 1 || col0 + fp.spans - 1 > spec.cols) {
+    return { ok: false, reason: `${fp.spans} columns needed — does not fit here` };
+  }
+  const occ = buildOccupancy(parts);
+  const holes: HoleRef[] = [];
+  const pinTotal = fp.spans * 2;
+  for (let pin = 1; pin <= pinTotal; pin++) {
+    const h = fp.pinAt(col0, pin);
+    if (!h) continue;
+    const k = holeKey(h);
+    if (occ.map.has(k)) {
+      return { ok: false, reason: 'Hole occupied by another part' };
+    }
+    holes.push(h);
+  }
+  return { ok: true, holes };
+}
+
+/** Part display name for palette/BOM. */
+export function partLabel(part: PartInstance): string {
+  switch (part.type) {
+    case 'chip': return part.defId ?? 'chip';
+    case 'resistor': return `${part.props.ohms ?? 330} Ω`;
+    case 'led': return `LED (${part.props.color ?? 'red'})`;
+    case 'seg7': return `5161${part.props.polarity === 'CA' ? 'BS (CA)' : 'AS (CC)'}`;
+    case 'switch': return 'SPST switch';
+    case 'button': return 'Pushbutton';
+    case 'cap': return `${((part.props.farads ?? 1e-7) * 1e9).toFixed(0)} nF`;
+    case 'supply': return `${part.props.volts ?? 5} V supply`;
+    case 'clock555': return '555 clock module';
+  }
+}
