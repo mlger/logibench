@@ -136,8 +136,18 @@ export function toMinTerm(im: { term: number; mask: number }, n: 4 | 5 = 4): Min
     const v = (im.term >> bit) & 1;
     parts.push(v ? vars[i] : `${vars[i]}′`);
   }
+  // Every code whose masked projection matches the base — the map cells this
+  // term groups (its 1-cells plus the don't-cares it adopted). The loop
+  // overlay renders these per plane; hazard/exact-cover modes build on them.
+  const covers: number[] = [];
+  for (let code = 0; code < 1 << n; code++) {
+    if (coveredTerm(im.term, im.mask, code)) covers.push(code);
+  }
   return {
+    term: im.term,
     mask: im.mask,
+    covers,
+    literals: parts,
     sop: parts.length ? parts.join('·') : '1',
   };
 }
@@ -158,8 +168,8 @@ export function sopToGates(terms: MinTerm[], invertersAvailable = true): GateLis
   let andGates = 0; // 2-input AND gates needed (k-literal term → k-1 gates)
   let wideTerms = 0; // terms with more than 2 literals
   for (const t of terms) {
-    if (t.sop === '1') continue; // wire to VCC
-    const literals = t.sop.split('·');
+    if (t.literals.length === 0) continue; // constant 1 — wire to VCC
+    const literals = t.literals;
     literals.forEach((l) => {
       if (l.includes('′')) needInvert.add(l);
     });
@@ -207,8 +217,8 @@ export function sopToNandGates(terms: MinTerm[]): GateListEntry[] {
   const gates: GateListEntry[] = [];
   const productTerms: string[][] = [];
   for (const t of terms) {
-    if (t.sop === '1') continue; // wire to VCC — NAND-NAND degenerates
-    productTerms.push(t.sop.split('·'));
+    if (t.literals.length === 0) continue; // wire to VCC — NAND-NAND degenerates
+    productTerms.push(t.literals);
   }
   if (!productTerms.length) return gates;
   const rank2 = productTerms.length;

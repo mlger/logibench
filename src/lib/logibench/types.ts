@@ -246,6 +246,11 @@ export type SegmentId = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g';
 export type KMapCell = 0 | 1 | 'X';
 
 export interface MinTerm {
+  term: number; // implicant base code (masked-out bits are 0)
   mask: number; // bit set = variable eliminated
-  sop: string; // e.g. "W·X̄·Z"
+  /** Every minterm code the term groups — its 1-cells plus adopted don't-cares. */
+  covers: number[];
+  /** MSB-first literal list, e.g. ["W", "X′", "Z"]; [] means constant 1. */
+  literals: string[];
+  sop: string; // display string, e.g. "W·X′·Z"
 }

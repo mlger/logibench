@@ -7,6 +7,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Implicant loop overlay in the decoder design lab: every minimized term is
+  drawn on the K-map as a translucent rounded rectangle over the cells it
+  groups (the classic pencil loops), color-cycled across five hues that match
+  the term chips in the SOP card. Gray-wrap groups render as textbook edge
+  half-loops (a Z′ group hugs both vertical edges; X′Z′ draws four corner
+  loops), and in 5-variable mode E-eliminated terms loop both planes. Hovering
+  or keyboard-focusing a term chip emphasizes its loop and dims the rest;
+  hovering a map cell or truth-table row emphasizes every loop covering that
+  minterm and rings the matching chips. Overlays ignore pointer events, so
+  cell editing is unaffected. `MinTerm` is now structured — `term`, `covers`
+  (all grouped minterm codes), `literals` — and the gate estimators read
+  literals directly instead of parsing the display string (enabler for the
+  hazard/exact-cover modes in docs/kmap-lab-suggestions.md).
 - Truth table panel in the decoder design lab: a datasheet-style, fully
   editable table (minterm codes, binary inputs, digit glyphs, all seven
   segment outputs) wired to the same store as the K-map — edits in either
@@ -57,6 +70,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Map-hover → truth-table cross-highlight landed on the wrong row for half
+  the K-map cells: the delegated handler read the cell's grid position
+  (`data-r`/`data-c`) as if it were the binary minterm code, but the map lays
+  cells out in Gray order — grid position (01, 11) holds minterm m7, not m6.
+  Positions now map through `KMAP_ROWS`/`KMAP_COLS`, so every cell highlights
+  its own row (visible in both the truth table and the new loop emphasis).
 - **K-map minimizer could return an SOP that did not match the map.** The
   post-cover "keep only essential primes" filter removed all
   individually-redundant implicants at once — two of them can be jointly

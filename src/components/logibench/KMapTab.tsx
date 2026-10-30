@@ -21,6 +21,10 @@
  * edits the very same store cells from a per-code row view: hovering or
  * focusing a map cell highlights the matching table row and vice versa —
  * hoverCode is ephemeral KMapTab state, shared by both views.
+ *
+ * Every minimized term is also drawn as a colored loop over the cells it
+ * groups (the classic pencil loops): term chips and map loops share colors,
+ * and hovering/focusing either side traces the group on the other.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -35,7 +39,7 @@ import {
   type GateListEntry,
 } from '@/lib/logibench/kmap';
 import { CLASSIC_SEGMENT_EQUATIONS } from '@/data/chips';
-import type { Family, InventoryItem, KMapCell } from '@/lib/logibench/types';
+import type { Family, InventoryItem, KMapCell, MinTerm } from '@/lib/logibench/types';
 import { KMAP_SEGS, useKmapStore, type SegKey } from '@/store/kmapStore';
 import TruthTablePanel from '@/components/logibench/TruthTablePanel';
 import {
@@ -89,6 +93,89 @@ function stockFor(items: InventoryItem[], chip: string): number {
         (it.condition === 'new' || it.condition === 'used'),
     )
     .reduce((sum, it) => sum + it.qty, 0);
+}
+
+/**
+ * Loop colors cycled per term index so overlapping groups stay distinguishable.
+ * Term chips reuse the same family, so a chip and its map loop visibly match.
+ */
+const LOOP_COLORS = [
+  {
+    border: 'border-amber-500',
+    bg: 'bg-amber-500/15',
+    bgHot: 'bg-amber-500/30',
+    chip: 'border-amber-300 bg-amber-50 text-amber-700',
+    ring: 'ring-amber-500',
+  },
+  {
+    border: 'border-emerald-500',
+    bg: 'bg-emerald-500/15',
+    bgHot: 'bg-emerald-500/30',
+    chip: 'border-emerald-300 bg-emerald-50 text-emerald-700',
+    ring: 'ring-emerald-500',
+  },
+  {
+    border: 'border-violet-500',
+    bg: 'bg-violet-500/15',
+    bgHot: 'bg-violet-500/30',
+    chip: 'border-violet-300 bg-violet-50 text-violet-700',
+    ring: 'ring-violet-500',
+  },
+  {
+    border: 'border-rose-500',
+    bg: 'bg-rose-500/15',
+    bgHot: 'bg-rose-500/30',
+    chip: 'border-rose-300 bg-rose-50 text-rose-700',
+    ring: 'ring-rose-500',
+  },
+  {
+    border: 'border-teal-500',
+    bg: 'bg-teal-500/15',
+    bgHot: 'bg-teal-500/30',
+    chip: 'border-teal-300 bg-teal-50 text-teal-700',
+    ring: 'ring-teal-500',
+  },
+];
+
+/** One drawn loop: top-left cell (r, c), spanning h rows × w columns. */
+interface LoopRect {
+  r: number;
+  c: number;
+  h: number;
+  w: number;
+}
+
+/**
+ * Textbook loop rectangles for one implicant's covered cells (plane-local
+ * codes 0–15). Minterm codes are binary (W X / Y Z), but the map lays cells
+ * out in Gray order, so each code's row/column value is mapped through
+ * KMAP_ROWS/KMAP_COLS first. An implicant is then a product of a row set × a
+ * column set; each set splits into consecutive runs, so a Z′ group (columns
+ * 00 & 10 — the Gray wrap pair) becomes two half-loops on the map edges and
+ * X′Z′ becomes four corner loops. Runs never merge across the wrap, keeping
+ * every rectangle inside the grid.
+ */
+function loopRects(covers: number[]): LoopRect[] {
+  const rows = new Set<number>();
+  const cols = new Set<number>();
+  for (const code of covers) {
+    rows.add(KMAP_ROWS.indexOf(code >> 2));
+    cols.add(KMAP_COLS.indexOf(code & 3));
+  }
+  const runs = (set: Set<number>): [number, number][] => {
+    const out: [number, number][] = [];
+    for (const i of [...set].sort((a, b) => a - b)) {
+      const last = out[out.length - 1];
+      if (last && last[1] === i - 1) last[1] = i;
+      else out.push([i, i]);
+    }
+    return out;
+  };
+  const rects: LoopRect[] = [];
+  for (const [r0, r1] of runs(rows))
+    for (const [c0, c1] of runs(cols))
+      rects.push({ r: r0, c: c0, h: r1 - r0 + 1, w: c1 - c0 + 1 });
+  return rects;
 }
 
 function cellClasses(v: KMapCell, isEdited: boolean, compact = false): string {
@@ -211,6 +298,12 @@ const bits2 = (v: number): string => v.toString(2).padStart(2, '0');
  * planes fit on screen together. Cells expose ids/data attrs so arrow keys
  * can move focus between visual neighbours. `highlightCode` draws an amber
  * outline on the cell matching the truth-table row under the pointer.
+ *
+ * Each minimized `term` is drawn as a translucent loop over the cells it
+ * groups, as extra grid items spanning their cells (CSS computes the span
+ * geometry; wrap-around groups arrive pre-split into edge half-loops).
+ * `activeTerm` (chip hover/focus) emphasizes one loop; the cell under
+ * `highlightCode` emphasizes every loop that covers it.
  */
 function PlaneGrid({
   segment,
@@ -221,6 +314,8 @@ function PlaneGrid({
   five,
   compact,
   highlightCode,
+  terms,
+  activeTerm,
 }: {
   segment: SegKey;
   cells: KMapCell[];
@@ -230,7 +325,20 @@ function PlaneGrid({
   five: boolean;
   compact: boolean;
   highlightCode?: number | null;
+  terms: MinTerm[];
+  activeTerm: number | null;
 }) {
+  /* terms emphasized right now: the chip under the pointer/focus plus every
+     term grouping the highlighted cell (map hover or truth-table row hover) */
+  const emphasized = new Set<number>();
+  if (activeTerm != null) emphasized.add(activeTerm);
+  if (highlightCode != null) {
+    terms.forEach((t, i) => {
+      if (t.covers.includes(highlightCode)) emphasized.add(i);
+    });
+  }
+  const anyEmphasis = emphasized.size > 0;
+
   return (
     <div
       role="group"
@@ -256,9 +364,15 @@ function PlaneGrid({
           {bits2(yz)}
         </div>
       ))}
-      {/* rows (W X) with cells */}
+      {/* rows (W X) with cells — explicit grid areas so the loop overlays
+          below (also explicitly placed) may legally share their tracks;
+          auto-placed items would refuse to overlap and shift the map down */}
       {KMAP_ROWS.map((wx, r) => (
-        <div key={`row-${wx}`} className="col-span-5 grid grid-cols-subgrid">
+        <div
+          key={`row-${wx}`}
+          className="col-span-5 grid grid-cols-subgrid"
+          style={{ gridArea: `${r + 2} / 1 / span 1 / span 5` }}
+        >
           <div className="flex items-center justify-center rounded-md bg-stone-50 font-mono text-xs font-medium text-stone-500">
             {bits2(wx)}
           </div>
@@ -288,6 +402,24 @@ function PlaneGrid({
           })}
         </div>
       ))}
+      {/* implicant loops — translucent overlays spanning their cells; they sit
+          above the buttons but ignore pointer events, so edits still work */}
+      {terms.flatMap((t, i) => {
+        const local = t.covers.filter((code) => (code >> 4) === e).map((code) => code & 15);
+        if (local.length === 0) return [];
+        const col = LOOP_COLORS[i % LOOP_COLORS.length];
+        const hot = emphasized.has(i);
+        return loopRects(local).map((rc, j) => (
+          <div
+            key={`loop-${i}-${j}`}
+            aria-hidden="true"
+            className={`pointer-events-none rounded-lg ${col.border} ${
+              hot ? `z-20 border-[3px] ${col.bgHot}` : `z-10 border-2 ${col.bg}`
+            }${anyEmphasis && !hot ? ' opacity-35' : ''}`}
+            style={{ gridArea: `${rc.r + 2} / ${rc.c + 2} / span ${rc.h} / span ${rc.w}` }}
+          />
+        ));
+      })}
     </div>
   );
 }
@@ -326,15 +458,20 @@ export default function KMapTab() {
 
   /* cross-highlight between the K-map and the truth table (ephemeral) */
   const [hoverCode, setHoverCode] = useState<number | null>(null);
+  /* term chip hover/focus → emphasize its loop on the map (ephemeral) */
+  const [activeTerm, setActiveTerm] = useState<number | null>(null);
 
-  /* map-cell hover/focus → truth-table row highlight (event delegation on the map wrapper) */
+  /* map-cell hover/focus → truth-table row highlight (event delegation on the map wrapper).
+     data-r/data-c are GRID positions, so they map through the Gray-code row/col
+     tables to the minterm code — r*4+c alone would be wrong wherever the Gray
+     value differs from the index (positions 2 and 3). */
   const mapCellFrom = (target: EventTarget | null): number | null => {
     const btn = (target as HTMLElement).closest('button[data-r]');
     if (!btn) return null;
     const r = Number(btn.getAttribute('data-r'));
     const c = Number(btn.getAttribute('data-c'));
     const e = Number(btn.getAttribute('data-e') ?? '0');
-    return e * 16 + r * 4 + c;
+    return e * 16 + KMAP_ROWS[r] * 4 + KMAP_COLS[c];
   };
 
   /* rehydrate after mount — first render matches SSR, then stored edits land */
@@ -376,6 +513,14 @@ export default function KMapTab() {
   const terms = useMemo(() => minimize(cells), [cells]);
   const gates = useMemo(() => sopToGates(terms), [terms]);
   const nandGates = useMemo(() => sopToNandGates(terms), [terms]);
+  /* terms grouping the hovered/focused map or truth-table cell (ephemeral) */
+  const hoverCoverTerms = useMemo(
+    () =>
+      hoverCode == null
+        ? []
+        : terms.flatMap((t, i) => (t.covers.includes(hoverCode) ? [i] : [])),
+    [terms, hoverCode],
+  );
   const edited = useMemo(
     () => cells.map((v, i) => v !== CLASSIC_SEGMENT_EQUATIONS[segment][i % 16]),
     [cells, segment],
@@ -383,7 +528,7 @@ export default function KMapTab() {
   const isClassic = edited.every((e) => !e);
 
   const allDontCare = cells.length > 0 && cells.every((v) => v === 'X');
-  const isAlwaysOn = terms.some((t) => t.sop === '1');
+  const isAlwaysOn = terms.some((t) => t.literals.length === 0);
   const sopText =
     terms.length === 0
       ? allDontCare
@@ -568,6 +713,13 @@ export default function KMapTab() {
                 <span className="size-3 rounded-sm border border-stone-200 bg-white" aria-hidden="true" />
                 0 · off
               </span>
+              <span className="flex items-center gap-1.5">
+                <span
+                  className="size-3 rounded-[4px] border-2 border-amber-500 bg-amber-500/15"
+                  aria-hidden="true"
+                />
+                SOP group
+              </span>
             </div>
             <div
               className="overflow-x-auto pb-1"
@@ -589,6 +741,8 @@ export default function KMapTab() {
                   five={false}
                   compact={false}
                   highlightCode={hoverCode}
+                  terms={terms}
+                  activeTerm={activeTerm}
                 />
               ) : (
                 <div className="flex flex-col gap-4">
@@ -603,6 +757,8 @@ export default function KMapTab() {
                       five
                       compact
                       highlightCode={hoverCode}
+                      terms={terms}
+                      activeTerm={activeTerm}
                     />
                   </div>
                   <div>
@@ -616,6 +772,8 @@ export default function KMapTab() {
                       five
                       compact
                       highlightCode={hoverCode}
+                      terms={terms}
+                      activeTerm={activeTerm}
                     />
                   </div>
                 </div>
@@ -645,16 +803,32 @@ export default function KMapTab() {
               {terms.length === 0 ? (
                 <span className="text-sm text-stone-400">— no implicants</span>
               ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {terms.map((t, i) => (
-                    <Badge
-                      key={`term-${i}`}
-                      variant="outline"
-                      className="border-amber-200 bg-amber-50 font-mono text-amber-700"
-                    >
-                      {t.sop}
-                    </Badge>
-                  ))}
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex flex-wrap gap-1.5">
+                    {terms.map((t, i) => {
+                      const col = LOOP_COLORS[i % LOOP_COLORS.length];
+                      const hot = i === activeTerm || hoverCoverTerms.includes(i);
+                      return (
+                        <Badge
+                          key={`term-${i}`}
+                          tabIndex={0}
+                          onMouseEnter={() => setActiveTerm(i)}
+                          onMouseLeave={() => setActiveTerm((cur) => (cur === i ? null : cur))}
+                          onFocus={() => setActiveTerm(i)}
+                          onBlur={() => setActiveTerm((cur) => (cur === i ? null : cur))}
+                          aria-label={`Term ${i + 1} of ${terms.length}: ${t.sop}, groups ${t.covers.length} map cells`}
+                          className={`cursor-default font-mono ${col.chip}${
+                            hot ? ` ring-2 ${col.ring}` : ''
+                          }`}
+                        >
+                          {t.sop}
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-stone-400">
+                    Hover or focus a chip to trace its loop on the map — colors match.
+                  </p>
                 </div>
               )}
             </section>

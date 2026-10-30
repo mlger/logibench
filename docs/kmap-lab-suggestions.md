@@ -1,6 +1,7 @@
 # K-map lab — improvement suggestions
 
-**Status:** suggestions only — nothing implemented.
+**Status:** S1 (loop overlay) and S2 (structured `MinTerm`) are implemented;
+the rest are suggestions only.
 **Baseline:** commit `b46fff1` (truth table panel shipped; minimizer pruning,
 gate estimator, 5-var mode and store persistence already fixed in `923610d`).
 **Grounding:** `src/lib/logibench/kmap.ts` (272 L), `KMapTab.tsx` (776 L),
@@ -15,7 +16,7 @@ Effort: **S** ≤ 1 h · **M** a few hours · **L** multi-session.
 
 ## A. Teaching & visualization
 
-### S1 · P1 · M — Implicant group overlay ("loops") on the map
+### S1 · P1 · M — Implicant group overlay ("loops") on the map ✅
 Draw every chosen implicant as a translucent amber rounded rectangle over the
 cells it covers (the classic pencil loops). Hover/focus a term chip highlights
 its loop on the map and vice versa; color-cycle overlapping groups.
@@ -26,7 +27,7 @@ SOP text, so learners can't see *why* `X′·Z′` groups four cells.
 **Files:** `kmap.ts` (`MinTerm`, `minimize`, `toMinTerm`), `KMapTab.tsx`
 (overlay layer inside `PlaneGrid`, term-chip hover wiring).
 
-### S2 · P1 · S — Structured `MinTerm` (enabler for S1/S5/S7/S9)
+### S2 · P1 · S — Structured `MinTerm` (enabler for S1/S5/S7/S9) ✅
 Extend `MinTerm { mask, sop }` → `{ term, mask, covers: number[], literals }`
 (`sop` stays as the display string). The gate estimator currently parses
 `t.sop.split('·')` strings; structured literals make it robust and unlock the
