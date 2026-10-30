@@ -5,15 +5,21 @@
  *
  * BCD truth table → interactive per-segment K-map → minimized SOP → gate
  * list (AND–OR and NAND-only) → parts-inventory check. K-map cells cycle
- * 0 → 1 → X on click; the classic per-segment truth values (don't-cares on
- * codes 10–15) come from CLASSIC_SEGMENT_EQUATIONS (plan §4.6).
+ * 0 → 1 → X on click (arrow keys move between cells); the classic
+ * per-segment truth values (don't-cares on codes 10–15) come from
+ * CLASSIC_SEGMENT_EQUATIONS (plan §4.6).
+ *
+ * State lives in useKmapStore (Zustand + localStorage, rehydrated after
+ * mount) so edits survive tab switches and page reloads.
  *
  * Supports 4 variables (W X Y Z) and 5 variables (E W X Y Z): the 5-var map
  * is the classic two stacked 4×4 planes, where E selects the plane and
- * minterm index = E<<4 | W X Y Z.
+ * minterm index = E<<4 | W X Y Z. The E = 1 plane mirrors E = 0 until edited
+ * and survives 5 → 4 → 5 toggles.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { KeyboardEvent } from 'react';
 import { Check, Lightbulb, Minus, RefreshCw, RotateCcw, X } from 'lucide-react';
 import {
   KMAP_COLS,
@@ -24,7 +30,19 @@ import {
   type GateListEntry,
 } from '@/lib/logibench/kmap';
 import { CLASSIC_SEGMENT_EQUATIONS } from '@/data/chips';
-import type { Family, InventoryItem, KMapSpec } from '@/lib/logibench/types';
+import type { Family, InventoryItem, KMapCell } from '@/lib/logibench/types';
+import { KMAP_SEGS, useKmapStore, type SegKey } from '@/store/kmapStore';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -36,10 +54,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 
-type SegKey = KMapSpec['segment'];
-type CellVal = 0 | 1 | 'X';
-
-const SEGS: SegKey[] = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+const SEGS: SegKey[] = KMAP_SEGS;
 
 /** Section-header token: small, uppercase, tracked out. */
 const HDR = 'text-xs font-semibold uppercase tracking-wider text-stone-500';
@@ -58,36 +73,19 @@ const CLASSIC_SOP: { seg: SegKey; expr: string }[] = [
   { seg: 'g', expr: 'W + XY′ + X′Y + YZ′' },
 ];
 
-function classicCells(seg: SegKey, vars: 4 | 5): CellVal[] {
-  const c = CLASSIC_SEGMENT_EQUATIONS[seg];
-  return vars === 5 ? [...c, ...c] : [...c];
-}
-
-function classicSpecs(): Record<SegKey, KMapSpec> {
-  const out = {} as Record<SegKey, KMapSpec>;
-  for (const seg of SEGS) {
-    out[seg] = { segment: seg, vars: 4, cells: classicCells(seg, 4) };
-  }
-  return out;
-}
-
-/** Click cycle: 0 → 1 → X → 0. */
-const cycle = (v: CellVal): CellVal => (v === 0 ? 1 : v === 1 ? 'X' : 0);
-
-/** 0..3 → "00".."11" for K-map row/column labels. */
-const bits2 = (v: number): string => v.toString(2).padStart(2, '0');
-
-/** Usable stock for one chip: matching base, buildable family, not dead. */
+/** Usable stock for one chip: matching base, buildable family, healthy. */
 function stockFor(items: InventoryItem[], chip: string): number {
   return items
     .filter(
       (it) =>
-        it.base === chip && USABLE_FAMILIES.includes(it.family) && it.condition !== 'dead',
+        it.base === chip &&
+        USABLE_FAMILIES.includes(it.family) &&
+        (it.condition === 'new' || it.condition === 'used'),
     )
     .reduce((sum, it) => sum + it.qty, 0);
 }
 
-function cellClasses(v: CellVal, isEdited: boolean, compact = false): string {
+function cellClasses(v: KMapCell, isEdited: boolean, compact = false): string {
   const base = `relative flex ${compact ? 'size-14' : 'size-16'} cursor-pointer items-center justify-center rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600`;
   const byVal =
     v === 1
@@ -135,10 +133,77 @@ function GateTable({ entries, empty }: { entries: GateListEntry[]; empty: string
   );
 }
 
+/** Per-build inventory check: needed chips vs on-hand usable stock. */
+function StockList({
+  title,
+  entries,
+  inv,
+  empty,
+}: {
+  title: string;
+  entries: GateListEntry[];
+  inv: InventoryItem[] | null;
+  empty: string;
+}) {
+  return (
+    <section aria-label={`${title} inventory check`} className="flex flex-col gap-1.5">
+      <h3 className={HDR}>{title}</h3>
+      {entries.length === 0 ? (
+        <p className="text-sm text-stone-400">{empty}</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {entries.map((g) => {
+            const have = inv ? stockFor(inv, g.chip) : 0;
+            const status =
+              have === 0
+                ? {
+                    label: 'not in inventory',
+                    cls: 'border-stone-200 bg-stone-100 text-stone-500',
+                    Icon: Minus,
+                  }
+                : have >= g.qty
+                  ? {
+                      label: 'OK',
+                      cls: 'border-emerald-200 bg-emerald-50 text-emerald-600',
+                      Icon: Check,
+                    }
+                  : {
+                      label: `short by ${g.qty - have}`,
+                      cls: 'border-red-200 bg-red-50 text-red-600',
+                      Icon: X,
+                    };
+            return (
+              <div
+                key={g.chip}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2"
+              >
+                <div className="flex items-baseline gap-2">
+                  <span className="font-mono text-sm font-semibold text-stone-800">{g.chip}</span>
+                  <span className="text-xs text-stone-500">
+                    need {g.qty} · have {have}
+                  </span>
+                </div>
+                <Badge variant="outline" className={`${status.cls} gap-1`}>
+                  <status.Icon className="size-3" aria-hidden="true" />
+                  {status.label}
+                </Badge>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** 0..3 → "00".."11" for K-map row/column labels. */
+const bits2 = (v: number): string => v.toString(2).padStart(2, '0');
+
 /**
  * One 4×4 K-map plane. In 5-var mode (`five`) minterm codes are offset by
  * 16·E and labels mention the plane; `compact` shrinks cells so two stacked
- * planes fit on screen together.
+ * planes fit on screen together. Cells expose ids/data attrs so arrow keys
+ * can move focus between visual neighbours.
  */
 function PlaneGrid({
   segment,
@@ -150,7 +215,7 @@ function PlaneGrid({
   compact,
 }: {
   segment: SegKey;
-  cells: CellVal[];
+  cells: KMapCell[];
   edited: boolean[];
   onCellClick: (code: number) => void;
   e: 0 | 1;
@@ -183,18 +248,22 @@ function PlaneGrid({
         </div>
       ))}
       {/* rows (W X) with cells */}
-      {KMAP_ROWS.map((wx) => (
+      {KMAP_ROWS.map((wx, r) => (
         <div key={`row-${wx}`} className="col-span-5 grid grid-cols-subgrid">
           <div className="flex items-center justify-center rounded-md bg-stone-50 font-mono text-xs font-medium text-stone-500">
             {bits2(wx)}
           </div>
-          {KMAP_COLS.map((yz) => {
+          {KMAP_COLS.map((yz, c) => {
             const code = e * 16 + wx * 4 + yz;
             const v = cells[code];
             return (
               <button
                 key={`cell-${code}`}
+                id={`kmap-cell-${e}-${r}-${c}`}
                 type="button"
+                data-r={r}
+                data-c={c}
+                data-e={e}
                 onClick={() => onCellClick(code)}
                 aria-label={`minterm m${code}${five ? `, E = ${e}` : ''}, WX=${bits2(wx)}, YZ=${bits2(yz)}, value ${v}. Click to cycle 0, 1, X.`}
                 className={cellClasses(v, edited[code], compact)}
@@ -212,10 +281,40 @@ function PlaneGrid({
   );
 }
 
+/** Arrow keys move focus between visually adjacent cells inside one plane. */
+function onMapKeyDown(ev: KeyboardEvent<HTMLDivElement>) {
+  const btn = (ev.target as HTMLElement).closest('button[data-r]');
+  if (!btn) return;
+  const r = Number(btn.getAttribute('data-r'));
+  const c = Number(btn.getAttribute('data-c'));
+  const plane = btn.getAttribute('data-e') ?? '0';
+  let nr = r;
+  let nc = c;
+  if (ev.key === 'ArrowUp') nr = r - 1;
+  else if (ev.key === 'ArrowDown') nr = r + 1;
+  else if (ev.key === 'ArrowLeft') nc = c - 1;
+  else if (ev.key === 'ArrowRight') nc = c + 1;
+  else return;
+  if (nr < 0 || nr > 3 || nc < 0 || nc > 3) return;
+  ev.preventDefault();
+  document.getElementById(`kmap-cell-${plane}-${nr}-${nc}`)?.focus();
+}
+
 export default function KMapTab() {
-  const [segment, setSegment] = useState<SegKey>('a');
-  const [vars, setVars] = useState<4 | 5>(4);
-  const [specs, setSpecs] = useState<Record<SegKey, KMapSpec>>(classicSpecs);
+  /* ---------- persisted lab state (survives tab switches & reloads) ---------- */
+  const segment = useKmapStore((s) => s.segment);
+  const vars = useKmapStore((s) => s.vars);
+  const cells32 = useKmapStore((s) => s.cells[segment]);
+  const setSegmentStore = useKmapStore((s) => s.setSegment);
+  const cycleCell = useKmapStore((s) => s.cycleCell);
+  const toggleVarsStore = useKmapStore((s) => s.toggleVars);
+  const resetSegmentStore = useKmapStore((s) => s.resetSegment);
+  const resetAllStore = useKmapStore((s) => s.resetAll);
+
+  /* rehydrate after mount — first render matches SSR, then stored edits land */
+  useEffect(() => {
+    void useKmapStore.persist.rehydrate();
+  }, []);
 
   /* ---------- inventory fetch ---------- */
 
@@ -244,7 +343,10 @@ export default function KMapTab() {
 
   /* ---------- derived state (recomputed on every edit) ---------- */
 
-  const cells = specs[segment].cells;
+  const cells = useMemo(
+    () => (vars === 4 ? cells32.slice(0, 16) : cells32),
+    [cells32, vars],
+  );
   const terms = useMemo(() => minimize(cells), [cells]);
   const gates = useMemo(() => sopToGates(terms), [terms]);
   const nandGates = useMemo(() => sopToNandGates(terms), [terms]);
@@ -254,85 +356,53 @@ export default function KMapTab() {
   );
   const isClassic = edited.every((e) => !e);
 
+  const allDontCare = cells.length > 0 && cells.every((v) => v === 'X');
   const isAlwaysOn = terms.some((t) => t.sop === '1');
   const sopText =
     terms.length === 0
-      ? '0 (segment always off)'
+      ? allDontCare
+        ? 'any — every cell is a don′t-care'
+        : '0 (segment always off)'
       : isAlwaysOn
         ? '1 (wire to VCC)'
         : terms.map((t) => t.sop).join(' + ');
 
-  const andOrEmpty =
-    terms.length === 0
+  const andOrEmpty = allDontCare
+    ? 'Nothing to build — every cell is a don\'t-care; tie the segment LOW or HIGH as you like.'
+    : terms.length === 0
       ? 'No gates — tie the segment output LOW.'
       : isAlwaysOn
         ? 'No gates — wire the segment output to VCC.'
         : 'No gates needed.';
-  const nandEmpty =
-    terms.length === 0
+  const nandEmpty = allDontCare
+    ? 'Nothing to build — every cell is a don\'t-care.'
+    : terms.length === 0
       ? 'Nothing to build — the segment is always off.'
       : isAlwaysOn
         ? 'Nothing to build — wire to VCC.'
         : 'No NAND gates needed.';
 
-  /* needed chips = SOP gate list + NAND-only list, summed per chip id */
-  const neededRows = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const g of [...gates, ...nandGates]) {
-      map.set(g.chip, (map.get(g.chip) ?? 0) + g.qty);
-    }
-    return [...map.entries()]
-      .sort((x, y) => x[0].localeCompare(y[0]))
-      .map(([chip, qty]) => ({ chip, qty, have: inv ? stockFor(inv, chip) : 0 }));
-  }, [gates, nandGates, inv]);
+  const gateSummary =
+    gates.length === 0 ? 'no gates needed' : gates.map((g) => `${g.qty} × ${g.chip}`).join(', ');
 
   /* ---------- handlers ---------- */
 
-  const handleCellClick = (code: number) => {
-    setSpecs((prev) => {
-      const cur = prev[segment];
-      return {
-        ...prev,
-        [segment]: {
-          ...cur,
-          cells: cur.cells.map((v, i) => (i === code ? cycle(v) : v)),
-        },
-      };
-    });
-  };
+  const handleCellClick = (code: number) => cycleCell(segment, code);
+  const toggleVars = (next: 4 | 5) => toggleVarsStore(next);
+  const resetSegment = () => resetSegmentStore(segment);
 
-  /** Switch 4 ↔ 5 variables. 4→5 copies each segment's current map onto both
-   *  planes (E drops out of the SOP until the E = 1 plane is edited); 5→4
-   *  keeps the E = 0 plane. Applies to all segments so switching is safe. */
-  const toggleVars = (next: 4 | 5) => {
-    if (next === vars) return;
-    setVars(next);
-    setSpecs((prev) => {
-      const out = {} as Record<SegKey, KMapSpec>;
-      for (const seg of SEGS) {
-        const cur = prev[seg].cells;
-        out[seg] = {
-          segment: seg,
-          vars: next,
-          cells: next === 5 ? [...cur, ...cur] : cur.slice(0, 16),
-        };
-      }
-      return out;
-    });
-  };
-
-  const resetSegment = () => {
-    setSpecs((prev) => ({
-      ...prev,
-      [segment]: { segment, vars, cells: classicCells(segment, vars) },
-    }));
-  };
+  /* "Reset all" is armed only when something differs from the classic map */
+  const anyEdits = useKmapStore((s) =>
+    KMAP_SEGS.some((seg) =>
+      s.cells[seg].some((v, i) => v !== CLASSIC_SEGMENT_EQUATIONS[seg][i % 16]),
+    ),
+  );
 
   /* ---------- render ---------- */
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Header row: segment selector + variable count + reset + explainer */}
+      {/* Header row: segment selector + variable count + resets + explainer */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <div role="group" aria-label="Segment selector" className="flex flex-wrap gap-1.5">
@@ -346,7 +416,7 @@ export default function KMapTab() {
                   size="icon"
                   aria-pressed={active}
                   aria-label={`Segment ${s}`}
-                  onClick={() => setSegment(s)}
+                  onClick={() => setSegmentStore(s)}
                   className={`size-11 cursor-pointer font-mono text-base font-semibold ${
                     active
                       ? 'border-amber-600 bg-amber-600 text-white hover:bg-amber-700 hover:text-white'
@@ -380,26 +450,60 @@ export default function KMapTab() {
             ))}
           </div>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={resetSegment}
-          disabled={isClassic}
-          className="cursor-pointer"
-        >
-          <RotateCcw aria-hidden="true" />
-          Reset to classic
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={resetSegment}
+            disabled={isClassic}
+            className="cursor-pointer"
+          >
+            <RotateCcw aria-hidden="true" />
+            Reset to classic
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!anyEdits}
+                className="cursor-pointer"
+              >
+                <RotateCcw aria-hidden="true" />
+                Reset all
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Reset all segments to classic?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Restores all seven segments — both planes in 5-variable mode — to the classic BCD
+                  truth table. Your edits cannot be recovered afterwards.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="cursor-pointer">Keep edits</AlertDialogCancel>
+                <AlertDialogAction
+                  className="cursor-pointer"
+                  onClick={() => resetAllStore()}
+                >
+                  Reset all
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
       </div>
       <p className="text-sm text-stone-500">
         Active-HIGH (common-cathode) segment outputs. Click any K-map cell to cycle{' '}
-        <span className="font-mono font-medium text-stone-700">0 → 1 → X</span> (don&apos;t-care).
-        Codes 10–15 default to X.
+        <span className="font-mono font-medium text-stone-700">0 → 1 → X</span> (don&apos;t-care) —
+        or focus a cell and use the arrow keys. Codes 10–15 default to X.
         {vars === 5 && (
           <>
-            {' '}Five-variable mode: the E = 1 plane starts as a copy of E = 0, so E drops out of
-            the SOP until you edit it — switching back to 4 variables keeps the E = 0 plane.
+            {' '}Five-variable mode: planes stack for E = 0 and E = 1. The E = 1 plane mirrors
+            E = 0 until you edit it, and E = 1 edits survive switching back to 4 variables.
           </>
         )}
       </p>
@@ -438,7 +542,7 @@ export default function KMapTab() {
                 0 · off
               </span>
             </div>
-            <div className="overflow-x-auto pb-1">
+            <div className="overflow-x-auto pb-1" onKeyDown={onMapKeyDown}>
               {vars === 4 ? (
                 <PlaneGrid
                   segment={segment}
@@ -482,15 +586,16 @@ export default function KMapTab() {
         </Card>
 
         <Card className="border-stone-200 bg-white">
+          {/* single polite live region summarizing the whole result */}
+          <span aria-live="polite" aria-atomic="true" className="sr-only">
+            Segment {segment}, {vars} variables. Expression: {sopText}. Gates: {gateSummary}.
+          </span>
           <CardHeader>
             <CardTitle className={HDR}>Minimized SOP — live</CardTitle>
             <CardDescription>Quine–McCluskey cover, recomputed on every edit</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <div
-              aria-live="polite"
-              className="rounded-lg border border-stone-200 bg-stone-50 px-4 py-3"
-            >
+            <div className="rounded-lg border border-stone-200 bg-stone-50 px-4 py-3">
               <p className="break-words font-mono text-lg leading-relaxed text-stone-900">
                 {sopText}
               </p>
@@ -533,7 +638,8 @@ export default function KMapTab() {
         <CardHeader>
           <CardTitle className={HDR}>Inventory check</CardTitle>
           <CardDescription>
-            Usable stock = base match in LS · HC · HCT · CD4000, condition not dead
+            Usable stock = base match in LS · HC · HCT · CD4000, condition new or used
+            (suspect/dead excluded)
           </CardDescription>
           <CardAction>
             <Button
@@ -549,7 +655,7 @@ export default function KMapTab() {
             </Button>
           </CardAction>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+        <CardContent className="flex flex-col gap-4">
           {invError ? (
             <p role="alert" className="text-sm text-red-600">
               {invError}
@@ -559,50 +665,21 @@ export default function KMapTab() {
               <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
               Loading inventory…
             </p>
-          ) : neededRows.length === 0 ? (
-            <p className="text-sm text-stone-400">
-              Nothing to stock — this segment needs no gates.
-            </p>
           ) : (
-            <div className="flex flex-col gap-2">
-              {neededRows.map(({ chip, qty, have }) => {
-                const status =
-                  have === 0
-                    ? {
-                        label: 'not in inventory',
-                        cls: 'border-stone-200 bg-stone-100 text-stone-500',
-                        Icon: Minus,
-                      }
-                    : have >= qty
-                      ? {
-                          label: 'OK',
-                          cls: 'border-emerald-200 bg-emerald-50 text-emerald-600',
-                          Icon: Check,
-                        }
-                      : {
-                          label: `short by ${qty - have}`,
-                          cls: 'border-red-200 bg-red-50 text-red-600',
-                          Icon: X,
-                        };
-                return (
-                  <div
-                    key={chip}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2"
-                  >
-                    <div className="flex items-baseline gap-2">
-                      <span className="font-mono text-sm font-semibold text-stone-800">{chip}</span>
-                      <span className="text-xs text-stone-500">
-                        need {qty} · have {have}
-                      </span>
-                    </div>
-                    <Badge variant="outline" className={`${status.cls} gap-1`}>
-                      <status.Icon className="size-3" aria-hidden="true" />
-                      {status.label}
-                    </Badge>
-                  </div>
-                );
-              })}
-            </div>
+            <>
+              <StockList
+                title="AND-OR build"
+                entries={gates}
+                inv={inv}
+                empty={andOrEmpty}
+              />
+              <StockList
+                title="NAND-only build"
+                entries={nandGates}
+                inv={inv}
+                empty={nandEmpty}
+              />
+            </>
           )}
           <p className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-stone-600">
             <Lightbulb className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden="true" />
@@ -638,8 +715,8 @@ export default function KMapTab() {
             ))}
           </ul>
           <p className="text-stone-500">
-            The greedy minimizer may group don&apos;t-cares differently and produce an
-            equivalent-cost expression — compare literal counts, not exact groupings.
+            The minimizer may group don&apos;t-cares differently and produce an equivalent-cost
+            expression — compare literal counts, not exact groupings.
           </p>
         </CardContent>
       </Card>

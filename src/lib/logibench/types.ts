@@ -239,18 +239,13 @@ export interface SimResult {
 
 /* ---------------- K-map lab ---------------- */
 
-export interface KMapSpec {
-  segment: 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g';
-  /** input variables: 4 = classic BCD map (W X Y Z); 5 adds the E plane (E W X Y Z) */
-  vars: 4 | 5;
-  /** value for codes 0..15 (vars 4) or 0..31 (vars 5): 0, 1, or 'X' (don't care).
-   *  5-var index = E<<4 | W X Y Z — E is the plane selector (MSB). */
-  cells: (0 | 1 | 'X')[];
-}
+/** Seven-segment segment identifier, a…g. */
+export type SegmentId = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g';
+
+/** K-map cell value: 0, 1, or 'X' (don't care). */
+export type KMapCell = 0 | 1 | 'X';
 
 export interface MinTerm {
-  /** implicant covering these minterm codes */
-  cover: number[];
   mask: number; // bit set = variable eliminated
   sop: string; // e.g. "W·X̄·Z"
 }
