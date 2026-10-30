@@ -302,3 +302,63 @@ export function partLabel(part: PartInstance): string {
     case 'clock555': return '555 clock module';
   }
 }
+
+/* ---------------- Wire routing (jumper arcs) ---------------- */
+
+export interface ArcPath {
+  d: string;
+  /** apex point of the quadratic curve (handle anchor) */
+  apex: { x: number; y: number };
+  /** effective signed lift (px); positive bows left of from→to */
+  h: number;
+}
+
+/**
+ * Jumper-wire path: a quadratic arc that lifts off the board, magnitude
+ * scaled by span (short hops stay flat, long jumpers arch higher).
+ * `lift` overrides the auto height; its sign picks the bow side.
+ * Cross-board spans (feature: multi-board) arch a bit higher.
+ */
+export function wireArc(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  opts?: { lift?: number; crossBoard?: boolean },
+): ArcPath {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 0.001) {
+    return { d: `M ${a.x} ${a.y} L ${b.x} ${b.y}`, apex: { ...a }, h: 0 };
+  }
+  let h = Math.min(46, Math.max(8, 6 + 0.35 * dist));
+  if (opts?.crossBoard) h = Math.min(64, h + 14);
+  if (opts?.lift !== undefined) h = Math.max(-60, Math.min(60, opts.lift));
+  // left normal of the from→to direction (screen space: bows up for L→R wires)
+  const nx = dy / dist;
+  const ny = -dx / dist;
+  const cx = (a.x + b.x) / 2 + nx * h;
+  const cy = (a.y + b.y) / 2 + ny * h;
+  return {
+    d: `M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`,
+    apex: { x: (a.x + 2 * cx + b.x) / 4, y: (a.y + 2 * cy + b.y) / 4 },
+    h,
+  };
+}
+
+/**
+ * Every hole that currently holds a lead (part pin or wire end).
+ * A real tie-point accepts exactly one lead — placement, moves and new wire
+ * endpoints must land on holes outside this set.
+ */
+export function occupiedHoles(parts: PartInstance[], wires: { from: HoleRef; to: HoleRef }[], excludePartId?: string): Set<string> {
+  const s = new Set<string>();
+  for (const p of parts) {
+    if (p.id === excludePartId) continue;
+    for (const h of p.pins) s.add(holeKey(h));
+  }
+  for (const w of wires) {
+    s.add(holeKey(w.from));
+    s.add(holeKey(w.to));
+  }
+  return s;
+}

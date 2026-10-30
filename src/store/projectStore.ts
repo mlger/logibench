@@ -60,6 +60,8 @@ export interface EditorState {
   select: (sel: Selection) => void;
   deleteSelection: () => void;
   updatePart: (id: string, props: Partial<PartInstance['props']>) => void;
+  /** wire tweaks from the Inspector/canvas (lift, color) */
+  updateWire: (id: string, props: Partial<Pick<Wire, 'lift' | 'color'>>) => void;
   /** drag-and-drop: move an existing part so its first pin lands on `anchor` */
   movePart: (id: string, anchor: HoleRef) => void;
   /** drag-to-trash: remove a placed part entirely */
@@ -269,6 +271,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     });
   },
 
+  updateWire: (id, props) => {
+    get().commit((p) => {
+      const w = p.wires.find((x) => x.id === id);
+      if (w) Object.assign(w, props);
+    });
+  },
+
   movePart: (id, anchor) => {
     const st = get();
     const project = st.project;
@@ -281,6 +290,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       const others = project.parts.filter((x) => x.id !== id);
       const check = checkPlacement(board.kind, others, part.type, part.defId, anchor.col, board.id);
       if (!check.ok || !check.holes) return;
+      // target holes must also be free of wire ends
+      const wireOcc = new Set(project.wires.flatMap((w) => [holeKey(w.from), holeKey(w.to)]));
+      if (check.holes.some((h) => wireOcc.has(holeKey(h)))) return;
       get().commit((p) => {
         const i = p.parts.findIndex((x) => x.id === id);
         if (i >= 0) p.parts[i].pins = check.holes!;
@@ -294,9 +306,10 @@ export const useEditor = create<EditorState>((set, get) => ({
     const dr = ALL_ROWS.indexOf(anchor.row) - ALL_ROWS.indexOf(part.pins[0].row);
     if (dc === 0 && dr === 0) return;
     const cols = BOARD_SPECS[board.kind].cols;
-    const occ = new Set(
-      project.parts.filter((x) => x.id !== id).flatMap((x) => x.pins.map((h) => holeKey(h))),
-    );
+    const occ = new Set([
+      ...project.parts.filter((x) => x.id !== id).flatMap((x) => x.pins.map((h) => holeKey(h))),
+      ...project.wires.flatMap((w) => [holeKey(w.from), holeKey(w.to)]),
+    ]);
     const newPins: HoleRef[] = [];
     for (const h of part.pins) {
       const col = h.col + dc;

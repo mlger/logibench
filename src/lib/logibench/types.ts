@@ -166,6 +166,8 @@ export interface Wire {
   from: HoleRef;
   to: HoleRef;
   color: string; // hex
+  /** signed arc height override (px, board space); + = left of from→to. Auto when absent */
+  lift?: number;
   bends?: { x: number; y: number }[]; // normalized bend points (future)
 }
 

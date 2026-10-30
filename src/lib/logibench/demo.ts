@@ -53,18 +53,18 @@ export function demo7447(): Project {
   // pins f-row: 9=e(10) 10=d(9) 11=c(8) 12=b(7) 13=a(6) 14=g(5) 15=f(4) 16=VCC(3)
   parts.push(part('chip', [[3, 'e'], [4, 'e'], [5, 'e'], [6, 'e'], [7, 'e'], [8, 'e'], [9, 'e'], [10, 'e'],
     [10, 'f'], [9, 'f'], [8, 'f'], [7, 'f'], [6, 'f'], [5, 'f'], [4, 'f'], [3, 'f']], {}, '7447'));
-  wires.push(wire([3, 'f'], [3, '+T'], WIRE_COLORS.red));     // VCC pin 16
-  wires.push(wire([10, 'e'], [10, '-T'], WIRE_COLORS.black)); // GND pin 8
-  wires.push(wire([5, 'e'], [5, '+T'], WIRE_COLORS.red));     // LT̅ high
-  wires.push(wire([6, 'e'], [6, '+T'], WIRE_COLORS.red));     // BI/RBO open-or-high
-  wires.push(wire([7, 'e'], [7, '+T'], WIRE_COLORS.red));     // RBI̅ high
+  wires.push(wire([3, 'h'], [3, '+T'], WIRE_COLORS.red));     // VCC pin 16 (same strip, one hole over)
+  wires.push(wire([10, 'd'], [10, '-T'], WIRE_COLORS.black)); // GND pin 8
+  wires.push(wire([5, 'd'], [5, '+T'], WIRE_COLORS.red));     // LT̅ high
+  wires.push(wire([6, 'd'], [6, '+T'], WIRE_COLORS.red));     // BI/RBO open-or-high
+  wires.push(wire([7, 'd'], [7, '+T'], WIRE_COLORS.red));     // RBI̅ high
 
   // 5161BS (CA) at cols 13..17
   // e-row: 1=e(13) 2=d(14) 3=com(15) 4=c(16) 5=dp(17); f-row: 6=b(17) 7=a(16) 8=com(15) 9=f(14) 10=g(13)
   parts.push(part('seg7', [[13, 'e'], [14, 'e'], [15, 'e'], [16, 'e'], [17, 'e'],
     [17, 'f'], [16, 'f'], [15, 'f'], [14, 'f'], [13, 'f']], { polarity: 'CA', color: 'red' }));
-  wires.push(wire([15, 'e'], [15, '+T'], WIRE_COLORS.red)); // common anode 3
-  wires.push(wire([15, 'f'], [15, '+T'], WIRE_COLORS.red)); // common anode 8
+  wires.push(wire([15, 'd'], [15, '+T'], WIRE_COLORS.red)); // common anode 3 (same strip as pin)
+  wires.push(wire([15, 'g'], [14, '+T'], WIRE_COLORS.red)); // common anode 8
 
   // one 330 Ω per segment: leg1 in the 7447 output strip (row j), leg2 in the
   // display segment strip (row j if the display pin is on row f, row a if on row e)
@@ -91,8 +91,9 @@ export function demo7447(): Project {
   inputs.forEach((cfg) => {
     parts.push(part('switch', [[cfg.swCol, 'b'], [cfg.swCol + 1, 'b']], { closed: false }));
     parts.push(part('resistor', [[cfg.swCol, 'a'], [cfg.swCol, '-T']], { ohms: 1000 }));
-    wires.push(wire([cfg.inPinCol, 'e'], [cfg.swCol, 'b'], WIRE_COLORS.amber));
-    wires.push(wire([cfg.swCol + 1, 'b'], [cfg.swCol + 1, '+T'], WIRE_COLORS.red));
+    // hop into the same column strip one row away — never stack on a pin hole
+    wires.push(wire([cfg.inPinCol, 'd'], [cfg.swCol, 'c'], WIRE_COLORS.amber));
+    wires.push(wire([cfg.swCol + 1, 'a'], [cfg.swCol + 1, '+T'], WIRE_COLORS.red));
   });
 
   // 0.1 µF decoupling across the 7447 power nets
@@ -114,22 +115,22 @@ export function demo4511(): Project {
 
   // 555 clock module: 1=V+(1,e) 2=GND(2,e) 3=OUT(3,e)
   parts.push(part('clock555', [[1, 'e'], [2, 'e'], [3, 'e']], { freqHz: 1 }));
-  wires.push(wire([1, 'e'], [1, '+T'], WIRE_COLORS.red));
-  wires.push(wire([2, 'e'], [1, '-T'], WIRE_COLORS.black));
-  wires.push(wire([3, 'e'], [5, 'f'], WIRE_COLORS.amber)); // OUT → CP0
+  wires.push(wire([1, 'd'], [2, '+T'], WIRE_COLORS.red));
+  wires.push(wire([2, 'd'], [2, '-T'], WIRE_COLORS.black));
+  wires.push(wire([3, 'd'], [5, 'g'], WIRE_COLORS.amber)); // OUT → CP0 (same strip as each pin)
 
   // 7490 (DIP14) at cols 5..11 — POWER IS PINS 5 & 10
   // e-row: 1=CP1(5) 2=MR1(6) 3=MR2(7) 4=NC(8) 5=VCC(9) 6=MS1(10) 7=MS2(11)
   // f-row: 8=Q2(11) 9=Q1(10) 10=GND(9) 11=Q3(8) 12=Q0(7) 13=NC(6) 14=CP0(5)
   parts.push(part('chip', [[5, 'e'], [6, 'e'], [7, 'e'], [8, 'e'], [9, 'e'], [10, 'e'], [11, 'e'],
     [11, 'f'], [10, 'f'], [9, 'f'], [8, 'f'], [7, 'f'], [6, 'f'], [5, 'f']], {}, '7490'));
-  wires.push(wire([9, 'e'], [9, '+T'], WIRE_COLORS.red));     // VCC = pin 5 !!
-  wires.push(wire([9, 'f'], [9, '-T'], WIRE_COLORS.black));   // GND = pin 10 !!
-  wires.push(wire([6, 'e'], [6, '-T'], WIRE_COLORS.black));   // MR1 low
-  wires.push(wire([7, 'e'], [7, '-T'], WIRE_COLORS.black));   // MR2 low
-  wires.push(wire([10, 'e'], [10, '-T'], WIRE_COLORS.black)); // MS1 low
-  wires.push(wire([11, 'e'], [11, '-T'], WIRE_COLORS.black)); // MS2 low
-  wires.push(wire([7, 'f'], [5, 'e'], WIRE_COLORS.green));    // Q0 → CP1 (BCD jumper)
+  wires.push(wire([9, 'd'], [9, '+T'], WIRE_COLORS.red));     // VCC = pin 5 !!
+  wires.push(wire([9, 'h'], [9, '-T'], WIRE_COLORS.black));   // GND = pin 10 !!
+  wires.push(wire([6, 'd'], [6, '-T'], WIRE_COLORS.black));   // MR1 low
+  wires.push(wire([7, 'd'], [7, '-T'], WIRE_COLORS.black));   // MR2 low
+  wires.push(wire([10, 'd'], [10, '-T'], WIRE_COLORS.black)); // MS1 low
+  wires.push(wire([11, 'd'], [11, '-T'], WIRE_COLORS.black)); // MS2 low
+  wires.push(wire([7, 'g'], [5, 'd'], WIRE_COLORS.green));    // Q0 → CP1 (BCD jumper)
 
   // 4511 (DIP16) at cols 14..21 — HCT variant: the 74LS90's VOH min 2.7 V meets
   // HCT VIH 2.0 V with margin; plain HC (VIH 3.15 V) would be marginal (ERC warns)
@@ -137,24 +138,24 @@ export function demo4511(): Project {
   // f-row: 9=e(21) 10=d(20) 11=c(19) 12=b(18) 13=a(17) 14=g(16) 15=f(15) 16=VCC(14)
   parts.push(part('chip', [[14, 'e'], [15, 'e'], [16, 'e'], [17, 'e'], [18, 'e'], [19, 'e'], [20, 'e'], [21, 'e'],
     [21, 'f'], [20, 'f'], [19, 'f'], [18, 'f'], [17, 'f'], [16, 'f'], [15, 'f'], [14, 'f']], {}, '4511', 'HCT'));
-  wires.push(wire([14, 'f'], [14, '+T'], WIRE_COLORS.red));   // VCC pin 16
-  wires.push(wire([21, 'e'], [21, '-T'], WIRE_COLORS.black)); // GND pin 8
-  wires.push(wire([16, 'e'], [16, '+T'], WIRE_COLORS.red));   // LT̅ high
-  wires.push(wire([17, 'e'], [17, '+T'], WIRE_COLORS.red));   // BI̅ high
-  wires.push(wire([18, 'e'], [18, '-T'], WIRE_COLORS.black)); // LE low = transparent
+  wires.push(wire([14, 'h'], [14, '+T'], WIRE_COLORS.red));   // VCC pin 16
+  wires.push(wire([21, 'd'], [21, '-T'], WIRE_COLORS.black)); // GND pin 8
+  wires.push(wire([16, 'd'], [16, '+T'], WIRE_COLORS.red));   // LT̅ high
+  wires.push(wire([17, 'd'], [17, '+T'], WIRE_COLORS.red));   // BI̅ high
+  wires.push(wire([18, 'd'], [18, '-T'], WIRE_COLORS.black)); // LE low = transparent
 
-  // Q → BCD inputs
-  wires.push(wire([7, 'f'], [20, 'e'], WIRE_COLORS.teal));  // Q0 → A
-  wires.push(wire([10, 'f'], [14, 'e'], WIRE_COLORS.teal)); // Q1 → B
-  wires.push(wire([11, 'f'], [15, 'e'], WIRE_COLORS.teal)); // Q2 → C
-  wires.push(wire([8, 'f'], [19, 'e'], WIRE_COLORS.teal));  // Q3 → D
+  // Q → BCD inputs (into the same strips as the pins, one row away)
+  wires.push(wire([7, 'h'], [20, 'd'], WIRE_COLORS.teal));  // Q0 → A
+  wires.push(wire([10, 'g'], [14, 'd'], WIRE_COLORS.teal)); // Q1 → B
+  wires.push(wire([11, 'g'], [15, 'd'], WIRE_COLORS.teal)); // Q2 → C
+  wires.push(wire([8, 'g'], [19, 'd'], WIRE_COLORS.teal));  // Q3 → D
 
   // 5161AS (CC) at cols 24..28
   // e-row: 1=e(24) 2=d(25) 3=com(26) 4=c(27) 5=dp(28); f-row: 6=b(28) 7=a(27) 8=com(26) 9=f(25) 10=g(24)
   parts.push(part('seg7', [[24, 'e'], [25, 'e'], [26, 'e'], [27, 'e'], [28, 'e'],
     [28, 'f'], [27, 'f'], [26, 'f'], [25, 'f'], [24, 'f']], { polarity: 'CC', color: 'red' }));
-  wires.push(wire([26, 'e'], [26, '-T'], WIRE_COLORS.black)); // common cathode 3
-  wires.push(wire([26, 'f'], [26, '-T'], WIRE_COLORS.black)); // common cathode 8
+  wires.push(wire([26, 'd'], [26, '-T'], WIRE_COLORS.black)); // common cathode 3
+  wires.push(wire([26, 'g'], [27, '-T'], WIRE_COLORS.black)); // common cathode 8
 
   // one 330 Ω per segment
   const segs2: { outCol: number; dspCol: number; dspRow: 'a' | 'j' }[] = [

@@ -374,5 +374,34 @@ export function runErc(ctx: ErcContext): SimIssue[] {
     }
   }
 
+  /* --- rule: legacy stacked leads (info) — new edits enforce one lead per hole --- */
+  {
+    const leads = new Map<string, number>(); // holeKey -> lead count
+    for (const part of project.parts) {
+      for (const h of part.pins) {
+        const k = holeKey(h);
+        leads.set(k, (leads.get(k) ?? 0) + 1);
+      }
+    }
+    const wireStacks: string[] = [];
+    for (const w of project.wires) {
+      for (const h of [w.from, w.to]) {
+        const k = holeKey(h);
+        const before = leads.get(k) ?? 0;
+        if (before > 0) wireStacks.push(`${parseHoleKey(k).col}·${parseHoleKey(k).row}`);
+        leads.set(k, before + 1);
+      }
+    }
+    if (wireStacks.length > 0) {
+      issues.push({
+        id: nid(), rule: 'stacked-holes', severity: 'info',
+        title: `${wireStacks.length} wire end${wireStacks.length === 1 ? '' : 's'} share a hole with another lead`,
+        detail: `Real tie-points hold ONE lead. Stacked at: ${[...new Set(wireStacks)].slice(0, 4).join(', ')}${wireStacks.length > 4 ? '…' : ''}. Rewire so each wire lands on its own hole — the editor no longer allows stacking.`,
+        why: 'Stacked leads work loose, make circuits impossible to debug, and can bridge to the neighboring strip.',
+        refs: [],
+      });
+    }
+  }
+
   return issues;
 }

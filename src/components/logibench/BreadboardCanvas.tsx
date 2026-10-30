@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HoleRef, PartInstance, Project, SimResult } from '@/lib/logibench/types';
 import {
   BOARD_SPECS, PITCH, boardDims, colX, chipPackage, checkPlacement, holeExists, holeKey,
-  nearestHole, parseHoleKey, partLabel, railGroups, rowY, sameHole,
+  nearestHole, occupiedHoles, parseHoleKey, partLabel, railGroups, rowY, sameHole, wireArc,
 } from '@/lib/logibench/geometry';
 import { netHolesOf, useEditor } from '@/store/projectStore';
 import { useDnd } from '@/store/dnd';
@@ -77,6 +77,38 @@ function CanvasInner(props: Props & { initialScale: number }) {
   useEffect(() => {
     viewRef.current = view;
   });
+
+  /** live lift value while an arc handle is being dragged (commit on release) */
+  const [liftDrag, setLiftDrag] = useState<{ id: string; lift: number } | null>(null);
+  const beginLiftDrag = useCallback((id: string, a: { x: number; y: number }, b: { x: number; y: number }, e: React.PointerEvent) => {
+    e.stopPropagation();
+    const svg = svgRef.current;
+    if (!svg) return;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const onMove = (ev: PointerEvent) => {
+      const rect = svg.getBoundingClientRect();
+      const v = viewRef.current;
+      const px = (ev.clientX - rect.left - v.x) / v.scale;
+      const py = (ev.clientY - rect.top - v.y) / v.scale;
+      // signed distance from the chord along the left normal
+      const h = ((px - mx) * (dy / dist)) + ((py - my) * (-dx / dist));
+      setLiftDrag({ id, lift: Math.max(-60, Math.min(60, Math.round(h))) });
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setLiftDrag((ld) => {
+        if (ld) useEditor.getState().updateWire(ld.id, { lift: ld.lift });
+        return null;
+      });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, [svgRef]);
 
   useEffect(() => {
     if (!dndPayload) return;
@@ -314,22 +346,50 @@ function CanvasInner(props: Props & { initialScale: number }) {
             opacity={0.07}
           />
 
-          {/* wires under holes' hit area, above board */}
+          {/* jumper wires — arced over the board, under the hole hit areas */}
           {project.wires.map((w) => {
             const a = pos(w.from);
             const b = pos(w.to);
-            const midX = (a.x + b.x) / 2;
-            const d = `M ${a.x} ${a.y} L ${midX} ${a.y} L ${midX} ${b.y} L ${b.x} ${b.y}`;
+            const cross = w.from.board !== w.to.board;
+            const dragging = liftDrag?.id === w.id ? liftDrag.lift : undefined;
+            const { d, apex } = wireArc(a, b, { lift: dragging ?? w.lift, crossBoard: cross });
             const selected = selection?.kind === 'wire' && selection.id === w.id;
+            const liftNow = dragging ?? w.lift ?? 0;
             return (
               <g key={w.id}>
                 <path d={d} fill="none" stroke={w.color} strokeWidth={selected ? 5 : 3.2} strokeLinecap="round" strokeLinejoin="round" opacity={0.92} />
                 {selected && <path d={d} fill="none" stroke="#fff" strokeWidth={1.4} strokeDasharray="4 4" />}
+                {/* plug dots where the leads enter the holes */}
+                <circle cx={a.x} cy={a.y} r={2.6} fill={w.color} />
+                <circle cx={b.x} cy={b.y} r={2.6} fill={w.color} />
                 <path
                   d={d} fill="none" stroke="transparent" strokeWidth={11} strokeLinecap="round"
                   style={{ cursor: 'pointer' }}
                   onClick={(e) => { e.stopPropagation(); props.onWireClick(w.id); }}
                 />
+                {selected && (
+                  <g
+                    data-testid={`wire-lift-${w.id}`}
+                    role="slider"
+                    aria-label="Wire arc height"
+                    aria-valuenow={Math.round(liftNow)}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      const step = e.key === 'ArrowUp' ? 4 : e.key === 'ArrowDown' ? -4 : 0;
+                      if (step) {
+                        e.preventDefault();
+                        useEditor.getState().updateWire(w.id, { lift: Math.max(-60, Math.min(60, liftNow + step)) });
+                      }
+                    }}
+                    style={{ cursor: 'grab' }}
+                    onPointerDown={(e) => beginLiftDrag(w.id, a, b, e)}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <circle cx={apex.x} cy={apex.y} r={10} fill="#d97706" opacity={0.15} />
+                    <circle cx={apex.x} cy={apex.y} r={4.5} fill="#fff" stroke="#d97706" strokeWidth={2} />
+                    <title>Drag to lift / flip the arc — arrow keys nudge</title>
+                  </g>
+                )}
               </g>
             );
           })}
@@ -460,8 +520,7 @@ function CanvasInner(props: Props & { initialScale: number }) {
           {/* drop target ring while dragging a wire or two-pin part over a hole (red = occupied) */}
           {dndPayload && dndHoverKey && (dndPayload.kind === 'wire' || (dndPayload.type !== 'chip' && dndPayload.type !== 'seg7')) && (() => {
             const p = pos(parseHoleKey(dndHoverKey));
-            const occupied = dndPayload.kind === 'part' &&
-              project.parts.some((pt) => pt.id !== dndPayload.partId && pt.pins.some((ph) => holeKey(ph) === dndHoverKey));
+            const occupied = occupiedHoles(project.parts, project.wires, dndPayload.partId).has(dndHoverKey);
             return <circle cx={p.x} cy={p.y} r={8} fill="none" stroke={occupied ? '#dc2626' : '#d97706'} strokeWidth={2} strokeDasharray="3 2" pointerEvents="none" />;
           })()}
         </g>
@@ -541,8 +600,7 @@ function WireDragLayer({ svgRef, view, origin, pos, color }: {
 
   if (!active || !pt) return null;
   const a = pos(origin);
-  const midX = (a.x + pt.x) / 2;
-  const d = `M ${a.x} ${a.y} L ${midX} ${a.y} L ${midX} ${pt.y} L ${pt.x} ${pt.y}`;
+  const { d } = wireArc(a, pt);
   return (
     <g pointerEvents="none" aria-hidden>
       <path d={d} fill="none" stroke={color} strokeWidth={3} strokeDasharray="7 5" strokeLinecap="round" opacity={0.9} />
