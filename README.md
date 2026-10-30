@@ -66,6 +66,15 @@ flagged in-app (the 7447/7448 "unique symbols" for codes 10–14 carry a *verify
 The classic K-map segment equations are derived live from the digit glyphs and reproduce the
 published equations for digits 0–9.
 
+## Documentation
+
+- [PLAN.md](PLAN.md) — the full implementation plan (goals, prior art, feature specs, chip data, architecture, roadmap, testing)
+- [ARCHITECTURE.md](ARCHITECTURE.md) — engine data flow, module map, complete ERC rule catalog
+- [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup and the datasheet-provenance standard for adding chips
+- [docs/chip-library.md](docs/chip-library.md) — `ChipDef` schema authoring guide
+- [docs/datasheet-sources.md](docs/datasheet-sources.md) — every electrical value traced to its source
+- [CHANGELOG.md](CHANGELOG.md) — release history
+
 ## Roadmap
 
 - Phase 2: 74192/74193/74390/74138 simulation models (74138 already simulated), 74HC595, timing view
