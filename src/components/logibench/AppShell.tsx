@@ -13,7 +13,7 @@ import KMapTab from './KMapTab';
 import InventoryTab from './InventoryTab';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Play, Pause, Undo2, Redo2, Save, FolderOpen, Download, Upload, Trash2, FlaskConical, Cpu } from 'lucide-react';
+import { Play, Pause, Undo2, Redo2, Save, FolderOpen, Download, Upload, Trash2, FlaskConical, Cpu, Layers } from 'lucide-react';
 
 type Tab = 'bench' | 'reference' | 'kmap' | 'inventory';
 
@@ -195,6 +195,9 @@ export default function AppShell() {
             </Button>
             <Button size="sm" variant="outline" className="h-8 gap-1 px-2 text-[11px]" onClick={() => useEditor.getState().loadDemo(2)} title="555 → 7490 → 4511 → common-cathode counter">
               <FlaskConical className="h-3.5 w-3.5 text-emerald-600" /> Lab 2
+            </Button>
+            <Button size="sm" variant="outline" className="h-8 gap-1 px-2 text-[11px]" onClick={() => useEditor.getState().loadDemo(3)} title="Two boards: 555 + 7490 on the Counter board → long jumpers → 4511 + display on the Display board">
+              <Layers className="h-3.5 w-3.5 text-violet-600" /> Lab 3
             </Button>
             <Button size="sm" variant="outline" className="h-8 gap-1 px-2" onClick={() => useEditor.getState().clearAll()} aria-label="Clear board">
               <Trash2 className="h-3.5 w-3.5" />

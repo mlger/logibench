@@ -101,15 +101,20 @@ export class Simulator {
 
   /** Full fixed-point evaluation + edge-triggered sequential update. */
   compute(): ComputeOutput {
-    const before = this.prevPinLevel;
-    const out = this.evaluate();
-    // sequential edge pass: compare current pin levels against the snapshot
-    // taken BEFORE this evaluation (evaluate() must not have clobbered it)
-    const seqChanged = this.sequentialPass(out, before);
-    if (seqChanged) {
-      const out2 = this.evaluate();
-      this.prevPinLevel = this.snapshotPinLevels(out2);
-      return out2;
+    let before = this.prevPinLevel;
+    let out = this.evaluate();
+    // Sequential edge pass: compare current pin levels against the snapshot
+    // taken BEFORE this evaluation (evaluate() must not have clobbered it).
+    // Edges can CASCADE within one step: a 7490 wired as a decade (Q0 → CP1)
+    // flips Q0 on the clock's falling edge, and Q0's own falling edge must
+    // then clock the ÷5 section during the SAME step. So repeat
+    // evaluate → edge-pass until the sequential state settles (bounded —
+    // a 7490 needs at most two extra rounds; nothing oscillates because each
+    // round only fires on level *changes* between rounds).
+    for (let round = 0; round < 6; round++) {
+      if (!this.sequentialPass(out, before)) break;
+      before = this.snapshotPinLevels(out);
+      out = this.evaluate();
     }
     this.prevPinLevel = this.snapshotPinLevels(out);
     return out;
