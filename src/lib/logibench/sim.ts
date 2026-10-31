@@ -1,9 +1,10 @@
 import type {
-  ChipDef, Drive, Family, Logic, Net, PartInstance, Project, SimIssue, SimResult,
+  ChipDef, Drive, Family, Logic, Net, Ne555AstableInfo, PartInstance, Project, SimIssue, SimResult,
   SegmentState, LedState, NetLevel,
 } from './types';
 import { getChipDef, FAMILIES } from '@/data/chips';
 import { buildNetlist, type NetlistResult } from './netlist';
+import { ne555Astable } from './ne555';
 import { holeKey } from './geometry';
 import { runErc, type ErcContext } from './erc';
 
@@ -45,11 +46,16 @@ export class Simulator {
   seq: Map<string, SeqState> = new Map();
   private prevPinLevel: Map<string, Logic[]> = new Map();
   private clock555: Map<string, { phase: number; out: 0 | 1 }> = new Map();
+  /** real NE555 chips (defId '555'): oscillator phase per part */
+  private ne555State: Map<string, { phase: number; out: 0 | 1 }> = new Map();
+  /** RC-derived astable params per part, refreshed by every evaluate() pass */
+  private ne555Rate: Map<string, Ne555AstableInfo> = new Map();
 
   constructor(project: Project) {
     this.project = project;
     for (const p of project.parts) {
       if (p.type === 'clock555') this.clock555.set(p.id, { phase: 0, out: 1 });
+      if (p.type === 'chip' && p.defId === '555') this.ne555State.set(p.id, { phase: 0, out: 1 });
       if (p.type === 'chip' && p.defId === '7490') this.seq.set(p.id, { q0: 0, q123: 0 });
       if (p.type === 'chip' && p.defId === '4511') this.seq.set(p.id, { q0: 0, q123: 0, latch: 0 });
     }
@@ -60,12 +66,16 @@ export class Simulator {
     const ids = new Set(project.parts.map((p) => p.id));
     for (const id of [...this.seq.keys()]) if (!ids.has(id)) this.seq.delete(id);
     for (const id of [...this.clock555.keys()]) if (!ids.has(id)) this.clock555.delete(id);
+    for (const id of [...this.ne555State.keys()]) if (!ids.has(id)) this.ne555State.delete(id);
     for (const p of project.parts) {
       if ((p.type === 'chip' && (p.defId === '7490' || p.defId === '4511')) && !this.seq.has(p.id)) {
         this.seq.set(p.id, { q0: 0, q123: 0, latch: 0 });
       }
       if (p.type === 'clock555' && !this.clock555.has(p.id)) {
         this.clock555.set(p.id, { phase: 0, out: 1 });
+      }
+      if (p.type === 'chip' && p.defId === '555' && !this.ne555State.has(p.id)) {
+        this.ne555State.set(p.id, { phase: 0, out: 1 });
       }
     }
     this.project = project;
@@ -83,7 +93,7 @@ export class Simulator {
     for (const s of this.seq.values()) { s.q0 = 0; s.q123 = 0; if (s.latch !== undefined) s.latch = 0; }
   }
 
-  /** Advance time by dtMs (555 modules oscillate), then recompute everything. */
+  /** Advance time by dtMs (555 modules + real NE555s oscillate), then recompute everything. */
   step(dtMs: number): ComputeOutput {
     for (const [id, st] of this.clock555) {
       const part = this.project.parts.find((p) => p.id === id);
@@ -95,6 +105,29 @@ export class Simulator {
         st.phase -= half;
         st.out = st.out === 1 ? 0 : 1;
       }
+    }
+    // real NE555s: tH = 0.693(RA+RB)·C, tL = 0.693·RB·C — the rates come from the
+    // RC parts wired to the chip, refreshed by the last evaluate() pass. If the
+    // first step happens before any evaluation, do one compute() to populate them.
+    if (this.ne555State.size > 0 && this.ne555Rate.size === 0) {
+      if (this.project.parts.some((p) => p.type === 'chip' && p.defId === '555')) this.compute();
+    }
+    for (const [id, st] of this.ne555State) {
+      const rate = this.ne555Rate.get(id);
+      if (!rate) continue;
+      // seconds → ms: 0.693·R·C s = 693·R·C ms (R in Ω, C in F)
+      const tHigh = Math.max(0.01, 693 * (rate.ra + rate.rb) * rate.c);
+      const tLow = Math.max(0.01, 693 * rate.rb * rate.c);
+      st.phase += dtMs;
+      let guard = 0;
+      while (guard++ < 5000) {
+        if (st.out === 1) {
+          if (st.phase >= tHigh) { st.phase -= tHigh; st.out = 0; } else break;
+        } else {
+          if (st.phase >= tLow) { st.phase -= tLow; st.out = 1; } else break;
+        }
+      }
+      if (guard >= 5000) st.phase = 0; // absurdly fast RC — resync instead of spinning
     }
     return this.compute();
   }
@@ -137,6 +170,8 @@ export class Simulator {
   private evaluate(): ComputeOutput {
     const project = this.project;
     const seqMap = this.seq;
+    const ne555State = this.ne555State;
+    const ne555Rate = this.ne555Rate;
     const netlist = buildNetlist(project, { switchStates: this.switchStates });
     const { nets, pinNet } = netlist;
 
@@ -233,6 +268,8 @@ export class Simulator {
             evalDecoder(def, part, family, on, iter);
           } else if (def.model === 'counter') {
             evalCounter(def, part, family, on, iter);
+          } else if (def.model === 'timer555') {
+            evalTimer555(def, part, family, on, iter);
           }
         } else if (part.type === 'clock555') {
           const net = pinNet(part.id, 3);
@@ -303,6 +340,7 @@ export class Simulator {
       poweredChips: new Set([...powered.entries()].filter(([, v]) => v).map(([k]) => k)),
       issues,
       counterValues,
+      ne555: new Map(ne555Rate),
     };
     return { result, ctx, netlist, netLevels: levels };
 
@@ -386,6 +424,30 @@ export class Simulator {
       for (const [pin, val] of qOuts) {
         const net = pinNet(part.id, pin);
         if (net !== undefined) addDrive(net, { partId: part.id, value: on ? (val as Logic) : 'X', strength: 'strong', family, kind: 'out' });
+      }
+    }
+
+    /** Real NE555 astable (TI SLFS022 §8.3.2): OUT toggles at the rate the wired
+     *  RA/RB/C network dictates; RESET̅ low forces OUT low + discharge on;
+     *  DISCH (open collector) only pulls LOW while OUT is low. The cap node
+     *  itself is analog — its net legitimately reads Z mid-ramp (the ERC's
+     *  floating-input check exempts TRIG/THRES/CTRL for this reason). */
+    function evalTimer555(def: ChipDef, part: PartInstance, family: Family, on: boolean, iter: number) {
+      const ast = ne555Astable(project, netlist, part);
+      if (iter === 0) {
+        if (ast) ne555Rate.set(part.id, ast);
+        else ne555Rate.delete(part.id);
+      }
+      const st = ne555State.get(part.id) ?? { phase: 0, out: 1 as 0 | 1 };
+      const held = on && ast !== null && readInput(part, def, 4, iter) === 0;
+      const outVal: Logic = !on || !ast ? 'X' : held ? 0 : st.out;
+      const outNet = pinNet(part.id, 3);
+      if (outNet !== undefined) {
+        addDrive(outNet, { partId: part.id, value: outVal, strength: 'strong', family, kind: 'out' });
+      }
+      const dischNet = pinNet(part.id, 7);
+      if (on && ast && dischNet !== undefined && (st.out === 0 || held)) {
+        addDrive(dischNet, { partId: part.id, value: 0, strength: 'strong', family, kind: 'out' });
       }
     }
 

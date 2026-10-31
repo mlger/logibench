@@ -461,21 +461,25 @@ export const CHIP_DEFS: ChipDef[] = [
     ],
   },
   {
-    id: '555', name: 'NE555 precision timer (ref. card — use the 555 clock module part in the simulator)',
-    families: ['NE555'], package: 'DIP8', power: { vcc: 8, gnd: 1 }, model: 'none', refOnly: true,
+    id: '555', name: 'NE555 precision timer (astable — wire RA / RB / C)',
+    families: ['NE555'], package: 'DIP8', power: { vcc: 8, gnd: 1 }, model: 'timer555',
     pins: [
       { num: 1, name: 'GND', dir: 'gnd' }, { num: 2, name: 'TRIG', dir: 'in' }, { num: 3, name: 'OUT', dir: 'out' },
       { num: 4, name: 'RESET̅', dir: 'in', activeLow: true, role: 'enable' }, { num: 5, name: 'CTRL', dir: 'in' },
-      { num: 6, name: 'THRES', dir: 'in' }, { num: 7, name: 'DISCH', dir: 'out' }, { num: 8, name: 'VCC', dir: 'pwr' },
+      { num: 6, name: 'THRES', dir: 'in' }, { num: 7, name: 'DISCH', dir: 'out', output: 'open-collector' }, { num: 8, name: 'VCC', dir: 'pwr' },
     ],
     electrical: FAMILIES.NE555,
+    limits: { ioMaxmA: 200 },
     datasheets: [
       { vendor: 'Texas Instruments', doc: 'NE555 — VCC 4.5–16 V; astable f ≅ 1.44/((RA+2RB)·C); "connect RESET to VCC when not used"; output sinks/sources up to 200 mA', rev: 'SLFS022 (latest rev)', url: 'https://www.ti.com/lit/ds/symlink/ne555.pdf' },
     ],
     gotchas: [
-      'Astable: f ≅ 1.44/((RA + 2RB)·C), tH ≅ 0.693(RA+RB)·C, tL ≅ 0.693·RB·C.',
-      'RESET (pin 4) floats = chaos. Tie it to VCC.',
-      'For the simulator, place the "555 clock module" part (3 terminals: V+, GND, OUT) — the bench module you would actually use in a lab.',
+      'Astable: f ≅ 1.44/((RA + 2RB)·C), tH ≅ 0.693(RA+RB)·C, tL ≅ 0.693·RB·C. The simulator derives f from the RA/RB/C parts you actually wire — swap the cap and watch the rate change.',
+      'Wiring: RA from VCC(8) to DISCH(7), RB from DISCH(7) to THRES(6), C from THRES(6) to GND(1), TRIG(2) tied to THRES(6), RESET̅(4) to VCC.',
+      'RESET̅ (pin 4) floats = chaos. Tie it to VCC.',
+      'DISCH (pin 7) is an open collector: it only pulls LOW while OUT is low — never wire it straight to VCC (use RA).',
+      'The 3-pin "555 clock module" part remains easy mode: it oscillates at its freqHz prop with no RC parts.',
+      'CTRL (pin 5) modulates the ⅓–⅔ VCC thresholds; the simulator models the default thresholds only.',
     ],
   },
 ];

@@ -2,6 +2,7 @@ import type { HoleRef, Net, NetLevel, PartInstance, Project, SimIssue } from './
 import { getChipDef, FAMILIES } from '@/data/chips';
 import { holeKey, parseHoleKey, isRailRow, holeExists } from './geometry';
 import type { NetlistResult } from './netlist';
+import { ne555Astable } from './ne555';
 
 /**
  * Electrical Rule Check (plan §3.2): pure function
@@ -137,28 +138,76 @@ export function runErc(ctx: ErcContext): SimIssue[] {
       if (pin.dir !== 'in' && !(pin.dir === 'io' && pin.role === 'bi')) continue;
       // 7447/7448 BI/RBO and RBI may legitimately be left open
       const openOk = (part.defId === '7447' || part.defId === '7448') && (pin.role === 'bi' || pin.role === 'rbi');
+      // 555 TRIG/THRES ride the analog cap node (Z mid-ramp is NORMAL in astable)
+      // and CTRL is the comparator-offset pin — the astable rule checks topology.
+      const is555Analog = part.defId === '555' && (pin.num === 2 || pin.num === 5 || pin.num === 6);
+      const is555Reset = part.defId === '555' && pin.num === 4;
       const net = netlist.pinNet(part.id, pin.num);
       if (net === undefined) continue;
       const lv = levels.get(net) ?? 'Z';
       if (lv !== 'Z' && lv !== 'conflict') continue;
       if (openOk && lv === 'Z') continue; // "must be open or HIGH" per TI
+      if (is555Analog && lv === 'Z') continue;
       const isCMOS = family === 'HC' || family === 'HCT' || family === 'CD4000';
       const is7490Reset = part.defId === '7490' && (pin.role === 'reset' || pin.role === 'set9');
       issues.push({
-        id: nid(), rule: is7490Reset ? 'counter-reset-floating' : 'floating-input',
-        severity: is7490Reset ? 'error' : isCMOS ? 'error' : 'warning',
+        id: nid(),
+        rule: is7490Reset ? 'counter-reset-floating' : is555Reset ? 'ne555-reset-floating' : 'floating-input',
+        severity: is7490Reset || is555Reset ? 'error' : isCMOS ? 'error' : 'warning',
         title: is7490Reset
           ? `${label(part)} reset/set pin ${pin.num} (${pin.name}) is floating`
-          : `Floating input: ${label(part)} pin ${pin.num} (${pin.name})`,
+          : is555Reset
+            ? `${label(part)} RESET̅ pin 4 is floating`
+            : `Floating input: ${label(part)} pin ${pin.num} (${pin.name})`,
         detail: is7490Reset
           ? 'The 7490 MR/MS pins are NOT internally grounded. Both MR pins floating HIGH (TTL) holds the counter in reset; both MS pins HIGH force it to 9.'
+          : is555Reset
+            ? 'TI NE555 (SLFS022): "connect RESET to VCC when not used". A floating RESET̅ chatters with bench noise and glitches the output.'
+            : isCMOS
+              ? 'Tie unused CMOS inputs to VCC or GND.'
+              : 'TTL inputs float HIGH — but do not rely on it; tie it.',
+        why: is555Reset
+          ? 'The reset comparator has no hysteresis on the pin — a floating RESET̅ randomly holds the flip-flop clear, freezing OUT low mid-run.'
           : isCMOS
-            ? 'Tie unused CMOS inputs to VCC or GND.'
-            : 'TTL inputs float HIGH — but do not rely on it; tie it.',
-        why: isCMOS
-          ? 'TI SCBA004E: an input parked in the threshold region turns both output transistors on — excess current, oscillation, reduced reliability.'
-          : 'LS inputs source 0.4 mA when LOW (IIL) and float HIGH; unused inputs should still be tied for noise immunity.',
+            ? 'TI SCBA004E: an input parked in the threshold region turns both output transistors on — excess current, oscillation, reduced reliability.'
+            : 'LS inputs source 0.4 mA when LOW (IIL) and float HIGH; unused inputs should still be tied for noise immunity.',
         refs: [{ partId: part.id, pin: pin.num }],
+      });
+    }
+  }
+
+  /* --- rule: real NE555 astable topology (P4-a) --- */
+  for (const part of project.parts) {
+    if (part.type !== 'chip' || part.defId !== '555') continue;
+    if (part.props.reversed || !powered.get(part.id)) continue; // root causes reported elsewhere
+    const ast = ne555Astable(project, netlist, part);
+    if (!ast) {
+      issues.push({
+        id: nid(), rule: 'ne555-astable-incomplete', severity: 'warning',
+        title: `${label(part)} is not wired as an astable oscillator`,
+        detail: 'Astable needs: RA from VCC(8) to DISCH(7), RB from DISCH(7) to THRES(6), C from THRES(6) to GND(1), and TRIG(2) tied to THRES(6). Then f ≅ 1.44/((RA+2RB)·C).',
+        why: 'TI SLFS022 §8.3.2: the cap charges through RA+RB and discharges through RB between ⅔ and ⅓ VCC. Missing any of the three parts means the comparators never toggle — the simulator reports OUT as indeterminate (X), as a real bench would.',
+        refs: [{ partId: part.id, pin: 7 }, { partId: part.id, pin: 6 }, { partId: part.id, pin: 2 }],
+      });
+      continue;
+    }
+    if (!ast.trigTied) {
+      issues.push({
+        id: nid(), rule: 'ne555-trig-not-tied', severity: 'warning',
+        title: `${label(part)} TRIG (2) is not tied to THRES (6)`,
+        detail: 'In the astable circuit the timing cap node drives BOTH comparators: THRES(6) and TRIG(2) must sit on the same net (the cap top plate). Wire a jumper from pin 2 to pin 6.',
+        why: 'TI SLFS022 Fig. 12: without TRIG tied to THRES the lower comparator never sees the cap ramp, so the flip-flop cannot re-trigger — the oscillator latches after one cycle.',
+        refs: [{ partId: part.id, pin: 2 }, { partId: part.id, pin: 6 }],
+      });
+    }
+    const resetNet = netlist.pinNet(part.id, 4);
+    if (resetNet !== undefined && (levels.get(resetNet) ?? 'Z') === 0) {
+      issues.push({
+        id: nid(), rule: 'ne555-reset-low', severity: 'warning',
+        title: `${label(part)} RESET̅ (4) is held LOW — OUT is stuck off`,
+        detail: 'RESET̅ overrides everything: while it is LOW the output is forced LOW and DISCH conducts. Tie pin 4 to VCC for normal astable run; use a wire to a switch if you want a manual stop.',
+        why: 'TI SLFS022: RESET̅ overrides both comparator inputs — a hard-wired LOW permanently mutes the oscillator (a common breadboard slip when the reset wire lands one row off).',
+        refs: [{ partId: part.id, pin: 4 }],
       });
     }
   }

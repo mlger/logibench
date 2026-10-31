@@ -1,8 +1,12 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useEditor } from '@/store/projectStore';
 import { getChipDef, SEG7_PINOUT } from '@/data/chips';
 import { partLabel } from '@/lib/logibench/geometry';
+import { buildNetlistCached } from '@/lib/logibench/netlist';
+import { ne555Astable } from '@/lib/logibench/ne555';
+import type { PartInstance } from '@/lib/logibench/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,6 +22,57 @@ import { gapRouteBends } from '@/lib/logibench/geometry';
 const SECTION = 'text-xs font-semibold uppercase tracking-wider text-stone-500';
 
 const RES_VALUES = [100, 150, 220, 270, 330, 470, 680, 1000, 2200, 4700, 10000];
+
+function formatFreq(hz: number): string {
+  if (hz >= 1e6) return `${(hz / 1e6).toFixed(hz / 1e6 >= 10 ? 1 : 2)} MHz`;
+  if (hz >= 1000) return `${(hz / 1000).toFixed(hz / 1000 >= 10 ? 1 : 2)} kHz`;
+  if (hz >= 10) return `${hz.toFixed(1)} Hz`;
+  return `${hz.toFixed(2)} Hz`;
+}
+
+function formatFarads(f: number): string {
+  if (f >= 1e-6) return `${+(f * 1e6).toPrecision(3)} µF`;
+  if (f >= 1e-9) return `${+(f * 1e9).toPrecision(3)} nF`;
+  return `${+(f * 1e12).toPrecision(3)} pF`;
+}
+
+function formatTime(sec: number): string {
+  if (sec >= 1) return `${sec.toFixed(2)} s`;
+  if (sec >= 1e-3) return `${+(sec * 1e3).toPrecision(3)} ms`;
+  return `${+(sec * 1e6).toPrecision(3)} µs`;
+}
+
+/** Real NE555: the RC network the user actually wired → the frequency it makes. */
+function Ne555Card({ part }: { part: PartInstance }) {
+  const project = useEditor((s) => s.project);
+  const ast = useMemo(() => ne555Astable(project, buildNetlistCached(project), part), [project, part]);
+  if (!ast) {
+    return (
+      <div className="rounded-lg border border-stone-200 bg-white p-3 text-[11px] leading-relaxed text-stone-500">
+        <b className="text-stone-700">Astable wiring:</b> RA from VCC(8) to DISCH(7), RB from DISCH(7)
+        to THRES(6), C from THRES(6) to GND(1), TRIG(2) tied to THRES(6), RESET̅(4) to VCC.
+        The moment all three parts are wired, this card shows the frequency they make:
+        f ≅ 1.44/((RA+2RB)·C).
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-stone-200 bg-white p-3">
+      <div className="text-xs font-semibold uppercase tracking-wider text-stone-500">Astable — from your RC parts</div>
+      <div className="mt-1 font-mono text-sm font-bold text-stone-800">f ≈ {formatFreq(ast.freqHz)}</div>
+      <div className="mt-0.5 font-mono text-[11px] leading-relaxed text-stone-500">
+        duty ≈ {Math.round(ast.dutyHigh * 100)}% HIGH<br />
+        RA {formatOhms(ast.ra)} · RB {formatOhms(ast.rb)} · C {formatFarads(ast.c)}<br />
+        t<sub>H</sub> ≈ {formatTime(0.693 * (ast.ra + ast.rb) * ast.c)} · t<sub>L</sub> ≈ {formatTime(0.693 * ast.rb * ast.c)}
+      </div>
+      {!ast.trigTied && (
+        <div className="mt-1.5 text-[11px] font-medium text-amber-700">
+          TRIG(2) is not tied to THRES(6) — the ERC flags it; the real circuit latches after one cycle.
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Inspector() {
   const selection = useEditor((s) => s.selection);
@@ -213,6 +268,8 @@ export default function Inspector() {
           {part?.id && <div className="mt-1 font-mono text-[9px] text-stone-300">{part.id}</div>}
         </div>
       </div>
+
+      {def?.id === '555' && part && <Ne555Card part={part} />}
 
       {part?.type === 'resistor' && (
         <div>

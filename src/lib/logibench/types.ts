@@ -58,7 +58,7 @@ export interface DatasheetRef {
   url: string;
 }
 
-export type ChipModelKind = 'gates' | 'decoder' | 'counter' | 'none';
+export type ChipModelKind = 'gates' | 'decoder' | 'counter' | 'timer555' | 'none';
 
 export interface ChipDef {
   id: string; // "7447"
@@ -258,6 +258,17 @@ export interface SimResult {
   issues: SimIssue[];
   counterValues: Map<string, number>; // partId -> count (7490 etc.)
   clockHigh?: Map<string, boolean>;
+  /** real NE555 chips: partId -> RC-derived astable parameters (f = 1.44/((RA+2RB)·C)) */
+  ne555?: Map<string, Ne555AstableInfo>;
+}
+
+export interface Ne555AstableInfo {
+  ra: number; // Ω
+  rb: number; // Ω
+  c: number; // F
+  freqHz: number;
+  dutyHigh: number; // fraction of the period OUT is HIGH: (RA+RB)/(RA+2RB)
+  trigTied: boolean; // TRIG(2) tied to THRES(6)
 }
 
 /* ---------------- K-map lab ---------------- */
