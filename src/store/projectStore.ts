@@ -7,7 +7,7 @@ import type {
 import {
   ALL_ROWS, BOARD_SPECS, boardDims, checkPlacement, holeExists, holeKey, pinCount, sameHole,
 } from '@/lib/logibench/geometry';
-import { buildNetlist } from '@/lib/logibench/netlist';
+import { buildNetlistCached } from '@/lib/logibench/netlist';
 import { Simulator } from '@/lib/logibench/sim';
 import { migrateProject } from '@/lib/logibench/migrate';
 import { emptyProject, demo7447, demo4511, demoTwoBoard } from '@/lib/logibench/demo';
@@ -247,11 +247,16 @@ export const useEditor = create<EditorState>((set, get) => ({
       ...project.wires.flatMap((w) => [holeKey(w.from), holeKey(w.to)]),
     ]);
     if (
-      occ.has(holeKey(from)) || occ.has(holeKey(to)) ||
+      occ.has(holeKey(from)) || occ.has(holeKey(to))
+    ) {
+      set({ flash: 'That hole is taken — one lead per tie-point.' });
+      return;
+    }
+    if (
       !holeExists(bf.kind, bf.railLayout, from.row, from.col) ||
       !holeExists(bt.kind, bt.railLayout, to.row, to.col)
     ) {
-      set({ flash: 'That hole is taken — one lead per tie-point.' });
+      set({ flash: 'That\u2019s a gap in the rail — bare plastic, nothing to plug into. Use a hole inside a group.' });
       return;
     }
     const w: Wire = { id: nextId('w'), from, to, color: color ?? get().wireColor };
@@ -516,7 +521,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   },
 }));
 
-/** Net holes for hover highlight (computed on demand). */
+/** Net holes for hover highlight (cached netlist per project revision). */
 export function netHolesOf(key: string, project: Project): string[] {
   const switchStates = new Map<string, boolean>();
   const sim = simulator;
@@ -525,7 +530,7 @@ export function netHolesOf(key: string, project: Project): string[] {
       if (p.type === 'switch' || p.type === 'button') switchStates.set(p.id, sim.getSwitch(p.id));
     }
   }
-  const { nets, holeNet } = buildNetlist(project, { switchStates });
+  const { nets, holeNet } = buildNetlistCached(project, switchStates);
   const netId = holeNet.get(key);
   if (netId === undefined) return [key];
   return nets[netId].holes;

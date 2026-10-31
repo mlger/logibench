@@ -1,5 +1,5 @@
 import { UnionFind } from './unionFind';
-import { holeKey, isRailRow, parseHoleKey, BOARD_SPECS, railGroups, RAIL_ROWS } from './geometry';
+import { holeKey, isRailRow, parseHoleKey, BOARD_SPECS, railGroups, RAIL_ROWS, holeExists } from './geometry';
 import type { HoleRef, Net, NetPin, PartInstance, Project, Wire } from './types';
 
 /**
@@ -24,6 +24,10 @@ export function enumerateHoles(project: Project): HoleIndex {
     const cols = BOARD_SPECS[board.kind].cols;
     for (let col = 1; col <= cols; col++) {
       for (const row of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', '+T', '-T', '+B', '-B'] as const) {
+        // groups5 rail gaps are bare plastic — no tie-point, no node. A stale or
+        // hand-edited project can still reference them; ERC flags those leads
+        // as `phantom-hole` (they must never join a net).
+        if (!holeExists(board.kind, board.railLayout, row, col)) continue;
         const k = holeKey({ board: board.id, col, row });
         node.set(k, holes.length);
         holes.push(k);
@@ -43,6 +47,7 @@ export interface NetlistResult {
 
 export function buildNetlist(project: Project, opts?: { switchStates?: Map<string, boolean> }): NetlistResult {
   const { node, holes } = enumerateHoles(project);
+  const pinNets = new Map<string, number>();
   const uf = new UnionFind(holes.length);
 
   const boardById = new Map(project.boards.map((b) => [b.id, b]));
@@ -117,7 +122,7 @@ export function buildNetlist(project: Project, opts?: { switchStates?: Map<strin
     holeNet.set(h, netOfNode.get(uf.find(node.get(h)!))!);
   }
 
-  // attach part pins
+  // attach part pins (and the O(1) pin→net index)
   for (const part of project.parts) {
     part.pins.forEach((h, idx) => {
       const pin = idx + 1;
@@ -125,6 +130,7 @@ export function buildNetlist(project: Project, opts?: { switchStates?: Map<strin
       if (netId === undefined) return;
       const np: NetPin = { partId: part.id, type: part.type, pin, hole: h };
       nets[netId].pins.push(np);
+      pinNets.set(`${part.id}:${pin}`, netId);
     });
   }
 
@@ -151,12 +157,7 @@ export function buildNetlist(project: Project, opts?: { switchStates?: Map<strin
     }
   }
 
-  const pinNet = (partId: string, pin: number): number | undefined => {
-    const part = project.parts.find((p) => p.id === partId);
-    if (!part) return undefined;
-    const h = part.pins[pin - 1];
-    return h ? holeNet.get(holeKey(h)) : undefined;
-  };
+  const pinNet = (partId: string, pin: number): number | undefined => pinNets.get(`${partId}:${pin}`);
 
   return { nets, holeNet, pinNet };
 }
@@ -165,13 +166,31 @@ export function holeRefsOfNet(nets: Net[], netId: number): HoleRef[] {
   return (nets[netId]?.holes ?? []).map(parseHoleKey);
 }
 
+/**
+ * Netlist cache for hover-path callers: keyed by the project object identity
+ * (commits produce new objects) plus the live switch states, so repeated
+ * hovers between edits never rebuild the union-find.
+ */
+const netlistCache = new WeakMap<Project, { swKey: string; res: NetlistResult }>();
+
+export function buildNetlistCached(project: Project, switchStates?: Map<string, boolean>): NetlistResult {
+  const swKey = switchStates
+    ? [...switchStates.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, v]) => `${k}=${v ? 1 : 0}`).join(';')
+    : '';
+  const hit = netlistCache.get(project);
+  if (hit && hit.swKey === swKey) return hit.res;
+  const res = buildNetlist(project, { switchStates });
+  netlistCache.set(project, { swKey, res });
+  return res;
+}
+
 /** All holes in the same net as `key` (for hover highlight). */
 export function netHolesFor(
   project: Project,
   key: string,
   switchStates?: Map<string, boolean>,
 ): string[] {
-  const { nets, holeNet } = buildNetlist(project, { switchStates });
+  const { nets, holeNet } = buildNetlistCached(project, switchStates);
   const id = holeNet.get(key);
   if (id === undefined) return [key];
   return nets[id].holes;

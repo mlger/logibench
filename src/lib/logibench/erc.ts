@@ -1,6 +1,6 @@
-import type { Net, NetLevel, PartInstance, Project, SimIssue } from './types';
+import type { HoleRef, Net, NetLevel, PartInstance, Project, SimIssue } from './types';
 import { getChipDef, FAMILIES } from '@/data/chips';
-import { holeKey, parseHoleKey, isRailRow } from './geometry';
+import { holeKey, parseHoleKey, isRailRow, holeExists } from './geometry';
 import type { NetlistResult } from './netlist';
 
 /**
@@ -164,6 +164,29 @@ export function runErc(ctx: ErcContext): SimIssue[] {
         detail: `${highs.map((d) => partsById.get(d.partId)?.defId ?? partsById.get(d.partId)?.type).join(', ')} drives HIGH while ${lows.map((d) => partsById.get(d.partId)?.defId ?? partsById.get(d.partId)?.type).join(', ')} drives LOW.`,
         why: 'Two push-pull outputs fighting = a short from VCC to GND through the chips. On the bench this heats the ICs and can destroy them.',
         refs: ds.map((d) => ({ partId: d.partId })),
+      });
+      break;
+    }
+  }
+
+  /* --- rule: latent contention — multiple push-pull outputs on one net.
+     The check above only fires while they actually disagree; two tied
+     outputs that happen to agree right now pass clean and fight on the
+     first clock edge. Counts DRIVERS, not parts: two outputs of the same
+     chip tied together contend just as hard. Wired-AND needs
+     open-collector parts. --- */
+  for (const net of nets) {
+    const outs = (ctx.drivers.get(net.id) ?? []).filter(
+      (d) => d.kind === 'out' && d.strength === 'strong' && (d.value === 0 || d.value === 1),
+    );
+    if (outs.length >= 2) {
+      const driverIds = [...new Set(outs.map((d) => d.partId))];
+      issues.push({
+        id: nid(), rule: 'wired-outputs', severity: 'error',
+        title: `${outs.length} push-pull outputs share one net`,
+        detail: `${driverIds.map((id) => partsById.get(id)?.defId ?? partsById.get(id)?.type).join(' + ')} drive this net from ${outs.length} output pins. They agree at the moment — the instant their levels differ they short each other.`,
+        why: 'Parallel push-pull outputs are only legal if exactly one drives at a time (tri-state) or the outputs are open-collector (7447-style). Combine signals with a gate instead.',
+        refs: driverIds.map((id) => ({ partId: id })),
       });
       break;
     }
@@ -442,6 +465,33 @@ export function runErc(ctx: ErcContext): SimIssue[] {
         why: 'Stacked leads work loose, make circuits impossible to debug, and can bridge to the neighboring strip.',
         refs: [],
       });
+    }
+  }
+
+  /* --- rule: leads landing where no tie-point exists (stale / hand-edited JSON).
+     The editor blocks these at drop time; the netlist now ignores them too —
+     without this rule a wire on a groups5 rail gap would silently do nothing. --- */
+  {
+    const boardOf = new Map(project.boards.map((b) => [b.id, b]));
+    const checkHole = (h: HoleRef, ref: SimIssue['refs'][number]) => {
+      const b = boardOf.get(h.board);
+      if (b && holeExists(b.kind, b.railLayout, h.row, h.col)) return;
+      issues.push({
+        id: nid(), rule: 'phantom-hole', severity: 'error',
+        title: `Lead lands where there is no hole (${h.board} col ${h.col} row ${h.row})`,
+        detail: b
+          ? 'This rail line has a gap here (full-plus boards break the power rails into 5-hole groups). The saved lead sits on bare plastic and connects to nothing — move it to a real tie-point.'
+          : 'This lead references a board that no longer exists in the project — it connects to nothing.',
+        why: 'Connectivity is built from physical tie-points. A lead on bare plastic is an open circuit no matter what the drawing shows.',
+        refs: [ref],
+      });
+    };
+    for (const part of project.parts) {
+      part.pins.forEach((h, idx) => checkHole(h, { partId: part.id, pin: idx + 1, hole: holeKey(h) }));
+    }
+    for (const w of project.wires) {
+      checkHole(w.from, { hole: holeKey(w.from) });
+      checkHole(w.to, { hole: holeKey(w.to) });
     }
   }
 
