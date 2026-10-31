@@ -61,7 +61,7 @@ export default function BottomPanel() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === 'erc' && (
           <div className="space-y-2 p-3">
-            {!simResult && <p className="text-xs text-stone-400">Open the Bench and place parts — the ERC runs live as you edit.</p>}
+            {!simResult && <p className="text-xs text-stone-500">Open the Bench and place parts — the ERC runs live as you edit.</p>}
             {simResult && issues.length === 0 && (
               <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-700">
                 No electrical problems found. Clean board!
@@ -106,7 +106,7 @@ export default function BottomPanel() {
             </TableHeader>
             <TableBody>
               {bom.length === 0 && (
-                <TableRow><TableCell colSpan={2} className="text-xs text-stone-400">Nothing placed yet.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={2} className="text-xs text-stone-500">Nothing placed yet.</TableCell></TableRow>
               )}
               {bom.map((line) => (
                 <TableRow key={line.key}>

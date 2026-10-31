@@ -32,7 +32,7 @@ export default function Inspector() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <Info className="h-6 w-6 text-stone-300" />
-        <p className="text-xs leading-relaxed text-stone-400">
+        <p className="text-xs leading-relaxed text-stone-500">
           Select a part or wire to inspect it.<br />
           Hover a hole to highlight its net.<br />
           {mode === 'simulate' ? 'Interact mode: click switches and hold buttons.' : 'Use Interact mode to drive the live circuit.'}
@@ -68,7 +68,7 @@ export default function Inspector() {
                 key={kind} type="button"
                 onClick={() => useEditor.getState().setBoardKind(board.id, kind)}
                 aria-pressed={board.kind === kind}
-                className={`rounded-md border px-2 py-1.5 text-[10px] font-medium ${board.kind === kind ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'}`}
+                className={`rounded-md border px-2 py-1.5 text-[11px] font-medium ${board.kind === kind ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'}`}
               >
                 {label}
               </button>
@@ -88,14 +88,14 @@ export default function Inspector() {
                 onClick={() => useEditor.getState().setRailLayout(board.id, layout)}
                 aria-pressed={board.railLayout === layout}
                 title={layout === 'groups5' ? 'Full-plus style: independent 5-hole groups (classic trap!)' : layout === 'center-split' ? 'Rails broken once in the middle' : 'Each rail line is one net'}
-                className={`rounded-md border px-1 py-1.5 text-[10px] font-medium ${board.railLayout === layout ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'}`}
+                className={`rounded-md border px-1 py-1.5 text-[11px] font-medium ${board.railLayout === layout ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'}`}
               >
                 {label}
               </button>
             ))}
           </div>
           {board.railLayout === 'groups5' && (
-            <p className="mt-1.5 text-[10px] leading-snug text-stone-500">Rails are broken into 5-hole groups — bridge them with jumpers or power each group.</p>
+            <p className="mt-1.5 text-[11px] leading-snug text-stone-500">Rails are broken into 5-hole groups — bridge them with jumpers or power each group.</p>
           )}
         </div>
         <div className="grid grid-cols-2 gap-1.5">
@@ -125,7 +125,7 @@ export default function Inspector() {
           </AlertDialog>
         </div>
         {project.boards.length >= 6 && (
-          <p className="text-[10px] text-stone-400">Board limit (6) reached — remove one to add another.</p>
+          <p className="text-[11px] text-stone-500">Board limit (6) reached — remove one to add another.</p>
         )}
       </div>
     );
@@ -188,7 +188,7 @@ export default function Inspector() {
               <button
                 key={v} type="button"
                 onClick={() => updatePart(part.id, { ohms: v })}
-                className={`rounded-md border px-1 py-1 font-mono text-[10px] ${part.props.ohms === v ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'}`}
+                className={`rounded-md border px-1 py-1 font-mono text-[11px] ${part.props.ohms === v ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50'}`}
               >{formatOhms(v)}</button>
             ))}
           </div>
@@ -197,7 +197,7 @@ export default function Inspector() {
               type="number" className="h-7 w-24 text-xs" value={part.props.ohms ?? 330}
               onChange={(e) => updatePart(part.id, { ohms: Math.max(1, Number(e.target.value) || 330) })}
             />
-            <span className="text-[10px] text-stone-400">nearest E24: {formatOhms(nearestESeries(part.props.ohms ?? 330))}</span>
+            <span className="text-[11px] text-stone-500">nearest E24: {formatOhms(nearestESeries(part.props.ohms ?? 330))}</span>
           </div>
         </div>
       )}
@@ -210,11 +210,11 @@ export default function Inspector() {
               <button
                 key={c} type="button"
                 onClick={() => updatePart(part.id, { color: c })}
-                className={`rounded-md border px-2 py-1 text-[10px] capitalize ${part.props.color === c ? 'border-amber-500 bg-amber-50' : 'border-stone-200 bg-white'}`}
+                className={`rounded-md border px-2 py-1 text-[11px] capitalize ${part.props.color === c ? 'border-amber-500 bg-amber-50' : 'border-stone-200 bg-white'}`}
               >{c}</button>
             ))}
           </div>
-          <p className="mt-2 rounded-md bg-stone-50 p-2 text-[10px] leading-relaxed text-stone-500">
+          <p className="mt-2 rounded-md bg-stone-50 p-2 text-[11px] leading-relaxed text-stone-500">
             Direction matters: <b>pin 1 = anode</b> (+, long leg), <b>pin 2 = cathode</b> (−, flat side).
             Backwards = dark — the ERC flags it. Series resistor required (ERC checks ≥ 220 Ω).
           </p>
@@ -229,11 +229,11 @@ export default function Inspector() {
               <button
                 key={c} type="button"
                 onClick={() => updatePart(part.id, { polarity: c })}
-                className={`rounded-md border px-2 py-1 font-mono text-[10px] ${part.props.polarity === c ? 'border-amber-500 bg-amber-50' : 'border-stone-200 bg-white'}`}
+                className={`rounded-md border px-2 py-1 font-mono text-[11px] ${part.props.polarity === c ? 'border-amber-500 bg-amber-50' : 'border-stone-200 bg-white'}`}
               >{c === 'CA' ? '5161BS · CA' : '5161AS · CC'}</button>
             ))}
           </div>
-          <div className="mt-3 rounded-md bg-stone-50 p-2 text-[10px] leading-relaxed text-stone-500">
+          <div className="mt-3 rounded-md bg-stone-50 p-2 text-[11px] leading-relaxed text-stone-500">
             {Object.entries(SEG7_PINOUT).map(([pin, seg]) => (
               <span key={pin} className="mr-2 inline-block font-mono">
                 {pin}=<span className={seg === 'com' ? 'font-bold text-red-600' : ''}>{seg}</span>
@@ -257,7 +257,7 @@ export default function Inspector() {
             onChange={(e) => updatePart(part.id, { freqHz: Number(e.target.value) })}
             className="mt-1 w-full accent-amber-600"
           />
-          <p className="mt-1 text-[10px] text-stone-400">Real NE555 astable: f ≅ 1.44/((RA+2RB)·C). 1k/68k/10µF ≈ 1 Hz.</p>
+          <p className="mt-1 text-[11px] text-stone-500">Real NE555 astable: f ≅ 1.44/((RA+2RB)·C). 1k/68k/10µF ≈ 1 Hz.</p>
         </div>
       )}
 
@@ -273,11 +273,11 @@ export default function Inspector() {
               <button
                 key={f} type="button"
                 onClick={() => updatePart(part.id, { farads: f })}
-                className={`rounded-md border px-2 py-1 text-[10px] ${part.props.farads === f ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600'}`}
+                className={`rounded-md border px-2 py-1 text-[11px] ${part.props.farads === f ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600'}`}
               >{label}</button>
             ))}
           </div>
-          <p className="mt-2 text-[10px] leading-relaxed text-stone-500">
+          <p className="mt-2 text-[11px] leading-relaxed text-stone-500">
             100 nF ceramic decouples each IC (ERC checks this). Electrolytics (≥ 1 µF) are polarized: pin 1 = +, pin 2 = −.
           </p>
         </div>
@@ -291,11 +291,11 @@ export default function Inspector() {
               <button
                 key={v} type="button"
                 onClick={() => updatePart(part.id, { volts: v })}
-                className={`rounded-md border px-2 py-1 font-mono text-[10px] ${part.props.volts === v ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600'}`}
+                className={`rounded-md border px-2 py-1 font-mono text-[11px] ${part.props.volts === v ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-stone-200 bg-white text-stone-600'}`}
               >{v} V</button>
             ))}
           </div>
-          <p className="mt-2 text-[10px] leading-relaxed text-stone-500">
+          <p className="mt-2 text-[11px] leading-relaxed text-stone-500">
             + terminal (red) → + net, − terminal (dark) → − net. Multiple supplies are fine on separate nets —
             paralleling different voltages on one net is a short (ERC errors).
           </p>
@@ -309,7 +309,7 @@ export default function Inspector() {
             VCC = pin {def.power.vcc} · GND = pin {def.power.gnd}
           </p>
           {def.power.vcc !== def.pins.length && def.power.vcc !== 14 && (
-            <p className="mt-1 text-[10px] font-medium text-red-600">Non-standard power pins — see the Reference tab!</p>
+            <p className="mt-1 text-[11px] font-medium text-red-600">Non-standard power pins — see the Reference tab!</p>
           )}
         </div>
       )}

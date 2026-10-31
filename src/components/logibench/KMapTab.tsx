@@ -881,7 +881,7 @@ export default function KMapTab() {
                       );
                     })}
                   </div>
-                  <p className="text-xs text-stone-400">
+                  <p className="text-xs text-stone-500">
                     Hover or focus a chip to trace its loop on the map — colors match.
                   </p>
                 </div>
@@ -1012,7 +1012,7 @@ export default function KMapTab() {
             expression — compare literal counts, not exact groupings.
           </p>
           {namesCustomized && (
-            <p className="text-xs text-stone-400">Classics are shown in the canonical W X Y Z naming.</p>
+            <p className="text-xs text-stone-500">Classics are shown in the canonical W X Y Z naming.</p>
           )}
         </CardContent>
       </Card>

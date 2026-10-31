@@ -172,7 +172,7 @@ export default function AppShell() {
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-stone-900">
               <Cpu className="h-4 w-4 text-amber-400" />
             </span>
-            <span className="text-sm font-black tracking-tight text-stone-900">LogicBench<span className="text-amber-600">PH</span></span>
+            <span className="text-sm font-black tracking-tight text-stone-900">LogicBench<span className="text-amber-700">PH</span></span>
           </div>
           <Input
             value={project.name}
@@ -189,7 +189,7 @@ export default function AppShell() {
             </Button>
           </div>
           <div className="flex items-center gap-1">
-            <span className="hidden text-[10px] font-medium uppercase tracking-wider text-stone-400 sm:inline">Demos:</span>
+            <span className="hidden text-[10px] font-medium uppercase tracking-wider text-stone-500 sm:inline">Demos:</span>
             <Button size="sm" variant="outline" className="h-8 gap-1 px-2 text-[11px]" onClick={() => useEditor.getState().loadDemo(1)} title="Switches → 7447 → common-anode display">
               <FlaskConical className="h-3.5 w-3.5 text-amber-600" /> Lab 1
             </Button>
@@ -204,7 +204,7 @@ export default function AppShell() {
             </Button>
           </div>
           <div className="ml-auto flex items-center gap-1">
-            {saveMsg && <span className="mr-1 text-[10px] text-stone-500">{saveMsg}</span>}
+            {saveMsg && <span className="mr-1 text-[11px] text-stone-500">{saveMsg}</span>}
             <Button size="sm" variant="outline" className="h-8 gap-1 px-2 text-[11px]" onClick={onSave}><Save className="h-3.5 w-3.5" /> Save</Button>
             <label className="cursor-pointer">
               <Button size="sm" variant="outline" className="h-8 gap-1 px-2 text-[11px]" asChild>
@@ -219,7 +219,7 @@ export default function AppShell() {
             <Button size="sm" variant="outline" className="h-8 gap-1 px-2 text-[11px]" onClick={onExportSvg} disabled={tab !== 'bench'}>SVG</Button>
             <Button
               size="sm"
-              className={`h-8 gap-1 px-3 text-[11px] font-semibold ${running ? 'bg-emerald-700 hover:bg-emerald-800' : 'bg-amber-600 hover:bg-amber-700'}`}
+              className={`h-8 gap-1 px-3 text-[11px] font-semibold ${running ? 'bg-emerald-700 hover:bg-emerald-800' : 'bg-amber-700 hover:bg-amber-800'}`}
               onClick={() => setRunning(!running)}
             >
               {running ? <><Pause className="h-3.5 w-3.5" /> Running</> : <><Play className="h-3.5 w-3.5" /> Simulate</>}
@@ -245,7 +245,7 @@ export default function AppShell() {
             </button>
           ))}
           {(errCount > 0 || warnCount > 0) && tab !== 'bench' && (
-            <span className={`ml-2 self-center rounded-full px-2 py-0.5 text-[10px] font-bold text-white ${errCount ? 'bg-red-600' : 'bg-amber-500'}`}>
+            <span className={`ml-2 self-center rounded-full px-2 py-0.5 text-[10px] font-bold ${errCount ? 'bg-red-600 text-white' : 'bg-amber-500 text-stone-900'}`}>
               {errCount} err · {warnCount} warn
             </span>
           )}
