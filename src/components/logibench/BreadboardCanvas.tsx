@@ -3,9 +3,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Breadboard, HoleRef, PartInstance, Project, SimResult } from '@/lib/logibench/types';
 import {
-  BOARD_SPECS, PITCH, boardDims, colX, chipPackage, checkPlacement, holeExists, holeKey,
-  nearestHoleOnBoards, occupiedHoles, parseHoleKey, partLabel, railGroups, rowY, sameHole, wireArc,
+  BOARD_SPECS, PITCH, boardDims, chipBodyRects, colX, chipPackage, checkPlacement, fromChordSpace,
+  gapRouteBends, holeExists, holeKey, liftSideFor, nearestHoleOnBoards, occupiedHoles, parseHoleKey,
+  partLabel, railGroups, rowY, sameHole, toChordSpace, wireArc,
 } from '@/lib/logibench/geometry';
+import type { BodyRect } from '@/lib/logibench/geometry';
 import { netHolesOf, useEditor } from '@/store/projectStore';
 import { useDnd } from '@/store/dnd';
 import { beginDragTracking } from './drag';
@@ -81,6 +83,8 @@ function CanvasInner(props: Props & { initialScale: number }) {
 
   /** live lift value while an arc handle is being dragged (commit on release) */
   const [liftDrag, setLiftDrag] = useState<{ id: string; lift: number } | null>(null);
+  /** live bend position while a Manhattan bend handle is dragged (chord space) */
+  const [bendDrag, setBendDrag] = useState<{ id: string; idx: number; x: number; y: number } | null>(null);
   const beginLiftDrag = useCallback((id: string, a: { x: number; y: number }, b: { x: number; y: number }, e: React.PointerEvent) => {
     e.stopPropagation();
     const svg = svgRef.current;
@@ -104,6 +108,36 @@ function CanvasInner(props: Props & { initialScale: number }) {
       window.removeEventListener('pointerup', onUp);
       setLiftDrag((ld) => {
         if (ld) useEditor.getState().updateWire(ld.id, { lift: ld.lift });
+        return null;
+      });
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, [svgRef]);
+
+  /** drag a Manhattan bend point; commits the normalized chord-space position */
+  const beginBendDrag = useCallback((id: string, idx: number, a: { x: number; y: number }, b: { x: number; y: number }, e: React.PointerEvent) => {
+    e.stopPropagation();
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onMove = (ev: PointerEvent) => {
+      const rect = svg.getBoundingClientRect();
+      const v = viewRef.current;
+      const px = (ev.clientX - rect.left - v.x) / v.scale;
+      const py = (ev.clientY - rect.top - v.y) / v.scale;
+      const c = toChordSpace(a, b, { x: px, y: py });
+      setBendDrag({ id, idx, x: Math.min(1, Math.max(0, c.x)), y: Math.max(-200, Math.min(200, c.y)) });
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      setBendDrag((bd) => {
+        if (bd) {
+          const w = useEditor.getState().project.wires.find((x) => x.id === bd.id);
+          const bends = [...(w?.bends ?? [])];
+          bends[bd.idx] = { x: bd.x, y: bd.y };
+          useEditor.getState().updateWire(bd.id, { bends });
+        }
         return null;
       });
     };
@@ -147,6 +181,30 @@ function CanvasInner(props: Props & { initialScale: number }) {
         if (hole && d.hole && !sameHole(hole, d.hole)) st.addWire(d.hole, hole);
         useEditor.setState({ wireStart: null, mode: wireDragPrevMode.current ?? 'select' });
         wireDragPrevMode.current = null;
+        return;
+      }
+      if (d.kind === 'wire-end' && d.wireId && d.end && d.hole) {
+        // re-terminate one end of an existing wire onto a free tie-point
+        const hole = clientToHole(ev.clientX, ev.clientY);
+        if (!hole || sameHole(hole, d.hole)) return;
+        const wire = st.project.wires.find((w) => w.id === d.wireId);
+        const other = wire ? (d.end === 'from' ? wire.to : wire.from) : undefined;
+        if (other && sameHole(hole, other)) {
+          st.setFlash('A wire needs two different holes.');
+          return;
+        }
+        const occ = new Set<string>();
+        for (const p of st.project.parts) for (const h of p.pins) occ.add(holeKey(h));
+        for (const w of st.project.wires) {
+          if (w.id === d.wireId) continue;
+          occ.add(holeKey(w.from));
+          occ.add(holeKey(w.to));
+        }
+        if (occ.has(holeKey(hole))) {
+          st.setFlash('That hole is taken — one lead per tie-point.');
+          return;
+        }
+        st.updateWire(d.wireId, { [d.end]: hole });
         return;
       }
       if (d.source === 'board' && d.partId && trashHit(ev.clientX, ev.clientY)) {
@@ -217,6 +275,16 @@ function CanvasInner(props: Props & { initialScale: number }) {
     if (!hoverKey) return null;
     return new Set(netHolesOf(hoverKey, project));
   }, [hoverKey, project]);
+
+  // chip/display body rects per board — used by the auto lift-side chooser
+  const rectsByBoard = useMemo(() => {
+    const m = new Map<string, BodyRect[]>();
+    for (const b of boards) m.set(b.id, chipBodyRects(project.parts, b));
+    return m;
+  }, [boards, project.parts]);
+
+  // ERC issue deep-link: the BottomPanel sets this to pulse the offending hole
+  const ercFocus = useEditor((s) => s.ercFocus);
 
   const holeLevel = useCallback(
     (key: string) => (running && simResult ? simResult.holeLevels.get(key) : undefined),
@@ -522,8 +590,22 @@ function CanvasInner(props: Props & { initialScale: number }) {
             const b = pos(w.to);
             const cross = w.from.board !== w.to.board;
             const dragging = liftDrag?.id === w.id ? liftDrag.lift : undefined;
-            const { d, apex } = wireArc(a, b, { lift: dragging ?? w.lift, crossBoard: cross });
+            const bendLive = bendDrag?.id === w.id ? bendDrag : null;
+            const bendsLive = bendLive && w.bends
+              ? w.bends.map((c, i) => (i === bendLive.idx ? { x: bendLive.x, y: bendLive.y } : c))
+              : w.bends;
+            const hasBends = !!bendsLive && bendsLive.length > 0;
+            const sign = !cross && dragging === undefined && w.lift === undefined && !hasBends
+              ? liftSideFor(a, b, rectsByBoard.get(w.from.board) ?? [])
+              : undefined;
             const selected = selection?.kind === 'wire' && selection.id === w.id;
+            const arc = hasBends ? null : wireArc(a, b, { lift: dragging ?? w.lift, sign, crossBoard: cross });
+            const d = hasBends
+              ? `M ${a.x} ${a.y} ${bendsLive!.map((c) => {
+                  const p = fromChordSpace(a, b, c);
+                  return `L ${p.x} ${p.y} `;
+                }).join('')}L ${b.x} ${b.y}`
+              : arc!.d;
             const liftNow = dragging ?? w.lift ?? 0;
             return (
               <g key={w.id}>
@@ -537,7 +619,7 @@ function CanvasInner(props: Props & { initialScale: number }) {
                   style={{ cursor: 'pointer' }}
                   onClick={(e) => { e.stopPropagation(); props.onWireClick(w.id); }}
                 />
-                {selected && (
+                {selected && arc && (
                   <g
                     data-testid={`wire-lift-${w.id}`}
                     role="slider"
@@ -555,11 +637,25 @@ function CanvasInner(props: Props & { initialScale: number }) {
                     onPointerDown={(e) => beginLiftDrag(w.id, a, b, e)}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <circle cx={apex.x} cy={apex.y} r={10} fill="#d97706" opacity={0.15} />
-                    <circle cx={apex.x} cy={apex.y} r={4.5} fill="#fff" stroke="#d97706" strokeWidth={2} />
+                    <circle cx={arc.apex.x} cy={arc.apex.y} r={10} fill="#d97706" opacity={0.15} />
+                    <circle cx={arc.apex.x} cy={arc.apex.y} r={4.5} fill="#fff" stroke="#d97706" strokeWidth={2} />
                     <title>Drag to lift / flip the arc — arrow keys nudge</title>
                   </g>
                 )}
+                {selected && hasBends && bendsLive!.map((c, i) => {
+                  const p = fromChordSpace(a, b, c);
+                  return (
+                    <g
+                      key={i}
+                      style={{ cursor: 'grab' }}
+                      onPointerDown={(e) => beginBendDrag(w.id, i, a, b, e)}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <circle cx={p.x} cy={p.y} r={6} fill="#fff" stroke="#d97706" strokeWidth={2} />
+                      <title>Drag the bend point</title>
+                    </g>
+                  );
+                })}
               </g>
             );
           })}
@@ -610,6 +706,42 @@ function CanvasInner(props: Props & { initialScale: number }) {
             );
           })}
 
+          {/* ERC issue deep-link: pulse the offending hole */}
+          {ercFocus && holePositions.has(ercFocus) && (() => {
+            const p = pos(parseHoleKey(ercFocus));
+            return (
+              <circle cx={p.x} cy={p.y} r={10} fill="none" stroke="#dc2626" strokeWidth={2.5} className="animate-pulse" pointerEvents="none" />
+            );
+          })()}
+
+          {/* selected wire: draggable end handles — re-terminate without delete+redraw */}
+          {!running && selection?.kind === 'wire' && (() => {
+            const w = project.wires.find((x) => x.id === selection.id);
+            if (!w) return null;
+            return (['from', 'to'] as const).map((end) => {
+              const p = pos(end === 'from' ? w.from : w.to);
+              return (
+                <g
+                  key={`${w.id}-${end}`}
+                  data-testid={`wire-end-${w.id}-${end}`}
+                  style={{ cursor: 'grab' }}
+                  onPointerDown={(e) => {
+                    if (e.pointerType === 'mouse' && e.button !== 0) return;
+                    e.stopPropagation();
+                    beginDragTracking(
+                      { kind: 'wire-end', wireId: w.id, end, hole: end === 'from' ? w.from : w.to, label: 'wire end' },
+                      e,
+                    );
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <circle cx={p.x} cy={p.y} r={5.5} fill="#fff" stroke="#d97706" strokeWidth={2} opacity={0.95} />
+                  <title>Drag to move this end to another hole</title>
+                </g>
+              );
+            });
+          })()}
+
           {/* ghost preview */}
           {ghost?.kind === 'multi' && (() => {
             const gb = boards.find((b) => b.id === ghost.boardId) ?? boards[0];
@@ -643,8 +775,8 @@ function CanvasInner(props: Props & { initialScale: number }) {
               />
             );
           })()}
-          {/* drop target ring while dragging a wire or two-pin part over a hole (red = occupied) */}
-          {dndPayload && dndHoverKey && (dndPayload.kind === 'wire' || (dndPayload.type !== 'chip' && dndPayload.type !== 'seg7')) && (() => {
+          {/* drop target ring while dragging a wire / wire end / two-pin part over a hole (red = occupied) */}
+          {dndPayload && dndHoverKey && (dndPayload.kind === 'wire' || dndPayload.kind === 'wire-end' || (dndPayload.type !== 'chip' && dndPayload.type !== 'seg7')) && (() => {
             const p = pos(parseHoleKey(dndHoverKey));
             const occupied = occupiedHoles(project.parts, project.wires, dndPayload.partId).has(dndHoverKey);
             return <circle cx={p.x} cy={p.y} r={8} fill="none" stroke={occupied ? '#dc2626' : '#d97706'} strokeWidth={2} strokeDasharray="3 2" pointerEvents="none" />;

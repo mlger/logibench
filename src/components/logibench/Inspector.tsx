@@ -10,9 +10,10 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { Trash2, Info, Copy } from 'lucide-react';
+import { Trash2, Info, Copy, Route, Zap } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { nearestESeries, formatOhms } from '@/lib/logibench/eseries';
+import { gapRouteBends } from '@/lib/logibench/geometry';
 
 const SECTION = 'text-xs font-semibold uppercase tracking-wider text-stone-500';
 
@@ -133,6 +134,7 @@ export default function Inspector() {
   }
 
   if (wire) {
+    const crossBoard = wire.from.board !== wire.to.board;
     return (
       <div className="space-y-4 p-4">
         <h3 className={SECTION}>Jumper wire</h3>
@@ -142,6 +144,37 @@ export default function Inspector() {
             ({wire.from.col},{wire.from.row}) → ({wire.to.col},{wire.to.row})
           </span>
         </div>
+        {crossBoard && (
+          <div>
+            <Label className="text-[11px] text-stone-500">Cross-board route</Label>
+            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+              <Button
+                variant="outline" size="sm"
+                title="Bend the jumper through the gap between the boards (drag the bend points on the canvas)"
+                onClick={() => {
+                  const bends = gapRouteBends(useEditor.getState().project.boards, wire.from, wire.to);
+                  if (!bends) {
+                    useEditor.getState().setFlash('The boards touch — there is no gap to route through.');
+                    return;
+                  }
+                  useEditor.getState().updateWire(wire.id, { bends });
+                }}
+              >
+                <Route className="h-3.5 w-3.5" /> Via gap
+              </Button>
+              <Button
+                variant="outline" size="sm" disabled={!wire.bends?.length}
+                title="Back to the plain arc"
+                onClick={() => useEditor.getState().updateWire(wire.id, { bends: undefined })}
+              >
+                Plain arc
+              </Button>
+            </div>
+            {wire.bends?.length ? (
+              <p className="mt-1 text-[11px] text-stone-500">Manhattan route — drag the bend points on the canvas.</p>
+            ) : null}
+          </div>
+        )}
         <div>
           <Label className="text-[11px] text-stone-500">Color</Label>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -259,6 +292,12 @@ export default function Inspector() {
             className="mt-1 w-full accent-amber-600"
           />
           <p className="mt-1 text-[11px] text-stone-500">Real NE555 astable: f ≅ 1.44/((RA+2RB)·C). 1k/68k/10µF ≈ 1 Hz.</p>
+          <Button
+            variant="outline" size="sm" className="mt-2 w-full"
+            onClick={() => useEditor.getState().wireChipPower(part.id)}
+          >
+            <Zap className="h-3.5 w-3.5" /> Wire power to the rails
+          </Button>
         </div>
       )}
 
@@ -329,6 +368,13 @@ export default function Inspector() {
           {def.power.vcc !== def.pins.length && def.power.vcc !== 14 && (
             <p className="mt-1 text-[11px] font-medium text-red-600">Non-standard power pins — see the Reference tab!</p>
           )}
+          <Button
+            variant="outline" size="sm" className="mt-2 w-full"
+            title="Jump each unwired power pin to the nearest free hole on the matching rail"
+            onClick={() => useEditor.getState().wireChipPower(part.id)}
+          >
+            <Zap className="h-3.5 w-3.5" /> Wire power to the rails
+          </Button>
         </div>
       )}
 

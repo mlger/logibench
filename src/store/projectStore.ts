@@ -8,6 +8,7 @@ import {
   ALL_ROWS, BOARD_SPECS, boardDims, checkPlacement, holeExists, holeKey, pinCount, sameHole, wireColorFor,
 } from '@/lib/logibench/geometry';
 import { buildNetlistCached } from '@/lib/logibench/netlist';
+import { autoPowerWires } from '@/lib/logibench/autowire';
 import { Simulator } from '@/lib/logibench/sim';
 import { migrateProject } from '@/lib/logibench/migrate';
 import { emptyProject, demo7447, demo4511, demoTwoBoard } from '@/lib/logibench/demo';
@@ -69,7 +70,9 @@ export interface EditorState {
   deleteSelection: () => void;
   updatePart: (id: string, props: Partial<PartInstance['props']>) => void;
   /** wire tweaks from the Inspector/canvas (lift, color, re-termination) */
-  updateWire: (id: string, props: Partial<Pick<Wire, 'lift' | 'color' | 'from' | 'to'>>) => void;
+  updateWire: (id: string, props: Partial<Pick<Wire, 'lift' | 'color' | 'from' | 'to' | 'bends'>>) => void;
+  /** one-click power wiring for the selected chip / 555 module */
+  wireChipPower: (partId: string) => void;
   /** drag-and-drop: move an existing part so its first pin lands on `anchor` */
   movePart: (id: string, anchor: HoleRef) => void;
   /** drag-to-trash: remove a placed part entirely */
@@ -304,6 +307,26 @@ export const useEditor = create<EditorState>((set, get) => ({
     get().commit((p) => {
       const w = p.wires.find((x) => x.id === id);
       if (w) Object.assign(w, props);
+    });
+  },
+
+  wireChipPower: (partId) => {
+    const project = get().project;
+    const res = autoPowerWires(project, partId);
+    if (res.wires.length === 0) {
+      set({ flash: res.problems[0] ?? 'Power already reaches the rails.' });
+      return;
+    }
+    get().commit((p) => {
+      for (const s of res.wires) {
+        p.wires.push({ id: nextId('w'), from: s.from, to: s.to, color: s.color });
+      }
+    });
+    set({
+      flash: res.problems.length
+        ? `Wired ${res.wires.map((w) => w.pinName).join(' + ')}. ${res.problems.join(' ')}`
+        : `Wired ${res.wires.map((w) => w.pinName).join(' + ')} to the rails.`,
+      selection: { kind: 'part', id: partId },
     });
   },
 

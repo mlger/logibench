@@ -163,5 +163,51 @@ for (const [name, proj] of [['Lab1', lab1], ['Lab2', demo4511()], ['Lab3', lab3]
   ok(Array.isArray(mw.bends) && mw.bends[0]?.y === -30, 'wire bends survive migration');
 }
 
+/* ---- 8. autoPowerWires: two specs, applied → chip powered ---- */
+{
+  const p: Project = {
+    schema: 2, name: 'autowire fixture',
+    boards: [{ id: 'main', kind: 'half400', railLayout: 'continuous' }],
+    parts: [], wires: [], notes: '',
+  };
+  const H = (col: number, row: string) => ({ board: 'main', col, row: row as never });
+  p.parts.push({
+    id: 'sup', type: 'supply', pins: [H(1, '+T'), H(1, '-T')], props: { volts: 5 },
+  });
+  p.parts.push({
+    id: 'ic', type: 'chip', defId: '7400',
+    pins: [
+      H(3, 'e'), H(4, 'e'), H(5, 'e'), H(6, 'e'), H(7, 'e'), H(8, 'e'), H(9, 'e'),
+      H(9, 'f'), H(8, 'f'), H(7, 'f'), H(6, 'f'), H(5, 'f'), H(4, 'f'), H(3, 'f'),
+    ],
+    props: {},
+  });
+  const { autoPowerWires } = await import('@/lib/logibench/autowire');
+  const res = autoPowerWires(p, 'ic');
+  ok(res.wires.length === 3 && res.problems.length === 0,
+    `autoPowerWires returns VCC + VCC rail bridge + GND (got ${res.wires.length} wires, ${res.problems.length} problems)`);
+  ok(res.wires[0].color === '#dc2626' && res.wires[1].color === '#dc2626' && res.wires[2].color === '#27272a',
+    'autoPowerWires colors power red (bridge included), GND black');
+  p.wires.push(...res.wires.map((s) => ({ id: `aw${p.wires.length + 1}`, from: s.from, to: s.to, color: s.color })));
+  const errs = ercOf(p).filter((i) => i.severity === 'error');
+  ok(errs.length === 0, `after auto-wiring, the 7400 fixture has zero ERC errors (got ${errs.length}${errs.length ? `: ${errs.map((e) => e.rule).join(',')}` : ''})`);
+}
+
+/* ---- 9. chord-space roundtrip + gap route for cross-board jumpers ---- */
+{
+  const { toChordSpace, fromChordSpace, gapRouteBends } = await import('@/lib/logibench/geometry');
+  const a = { x: 100, y: 200 };
+  const b = { x: 900, y: 80 };
+  const p = { x: 500, y: 140 };
+  const rt = fromChordSpace(a, b, toChordSpace(a, b, p));
+  ok(Math.hypot(rt.x - p.x, rt.y - p.y) < 0.001, `toChordSpace/fromChordSpace roundtrip (drift ${Math.hypot(rt.x - p.x, rt.y - p.y).toFixed(6)})`);
+  const lab3 = demoTwoBoard();
+  const crossWire = lab3.wires.find((w) => w.from.board !== w.to.board)!;
+  const bends = gapRouteBends(lab3.boards, crossWire.from, crossWire.to);
+  ok(bends !== null && bends.length === 2, `gapRouteBends returns 2 bends for a Lab 3 cross-board jumper (got ${bends?.length ?? 'null'})`);
+  const bendsSameBoard = gapRouteBends(lab3.boards, { board: 'main', col: 4, row: '+T' }, { board: 'main', col: 9, row: '+T' });
+  ok(bendsSameBoard === null, 'gapRouteBends returns null for same-board wires');
+}
+
 console.log(fail === 0 ? 'ALL OK' : `${fail} FAILURES`);
 process.exit(fail === 0 ? 0 : 1);

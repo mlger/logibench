@@ -77,6 +77,23 @@ export default function BottomPanel() {
                   onClick={() => {
                     const ref = iss.refs.find((r) => r.partId);
                     if (ref) select({ kind: 'part', id: ref.partId! });
+                    // deep-link: pulse the offending hole on the canvas for a few seconds
+                    const st = useEditor.getState();
+                    const holeRef =
+                      iss.refs.find((r) => r.hole)?.hole ??
+                      (() => {
+                        const r = iss.refs.find((x) => x.partId && x.pin);
+                        if (!r) return undefined;
+                        const p = st.project.parts.find((x) => x.id === r.partId);
+                        const h = p?.pins[(r.pin ?? 1) - 1];
+                        return h ? `${h.board}:${h.col}:${h.row}` : undefined;
+                      })();
+                    st.setErcFocus(holeRef ?? null);
+                    if (holeRef) {
+                      window.setTimeout(() => {
+                        if (useEditor.getState().ercFocus === holeRef) useEditor.getState().setErcFocus(null);
+                      }, 4000);
+                    }
                   }}
                   className={`flex w-full items-start gap-2 rounded-lg border p-2.5 text-left transition hover:shadow-sm ${style.cls}`}
                 >

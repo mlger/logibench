@@ -170,7 +170,10 @@ export interface Wire {
   color: string; // hex
   /** signed arc height override (px, board space); + = left of from→to. Auto when absent */
   lift?: number;
-  bends?: { x: number; y: number }[]; // normalized bend points (future)
+  /** Manhattan route: bend points in CHORD SPACE — x = fraction along from→to
+   *  (0..1), y = px along the left normal. See geometry.toChordSpace. When set,
+   *  the wire renders as a polyline and `lift` is ignored. */
+  bends?: { x: number; y: number }[];
 }
 
 export interface Project {

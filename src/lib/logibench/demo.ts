@@ -16,8 +16,8 @@ let uid = 0;
 const id = (p: string) => `${p}-${++uid}`;
 const H = (col: number, row: string) => ({ board: 'main', col, row: row as never });
 
-function wire(from: [number, string], to: [number, string], color: string): Wire {
-  return { id: id('w'), from: H(from[0], from[1]), to: H(to[0], to[1]), color };
+function wire(from: [number, string], to: [number, string], color: string, lift?: number): Wire {
+  return { id: id('w'), from: H(from[0], from[1]), to: H(to[0], to[1]), color, ...(lift !== undefined ? { lift } : {}) };
 }
 
 function part(t: PartInstance['type'], pins: [number, string][], props: PartInstance['props'], defId?: string, family?: PartInstance['family']): PartInstance {
@@ -157,10 +157,10 @@ export function demo4511(): Project {
   // Q → BCD inputs (into the same strips as the pins, one row away).
   // The four jumpers must cross by pinout (A is rightmost, D is 4th) — tiered
   // arc heights keep the bundle readable instead of one overlapping knot.
-  wires.push(wire([7, 'h'], [20, 'd'], WIRE_COLORS.teal));  // Q0 → A
-  wires.push(wire([10, 'g'], [14, 'd'], WIRE_COLORS.teal)); // Q1 → B
-  wires.push(wire([11, 'g'], [15, 'd'], WIRE_COLORS.teal)); // Q2 → C
-  wires.push(wire([8, 'g'], [19, 'd'], WIRE_COLORS.teal));  // Q3 → D
+  wires.push(wire([7, 'h'], [20, 'd'], WIRE_COLORS.teal, 30));  // Q0 → A (outermost = highest)
+  wires.push(wire([10, 'g'], [14, 'd'], WIRE_COLORS.teal, 16)); // Q1 → B
+  wires.push(wire([11, 'g'], [15, 'd'], WIRE_COLORS.teal, 4));  // Q2 → C
+  wires.push(wire([8, 'g'], [19, 'd'], WIRE_COLORS.teal, -18)); // Q3 → D (bows the other way, under the bundle)
 
   // 5161AS (CC) at cols 24..28
   // e-row: 1=e(24) 2=d(25) 3=com(26) 4=c(27) 5=dp(28); f-row: 6=b(28) 7=a(27) 8=com(26) 9=f(25) 10=g(24)

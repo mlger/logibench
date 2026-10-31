@@ -330,16 +330,139 @@ export interface ArcPath {
   h: number;
 }
 
+export interface Pt { x: number; y: number }
+
+/** Board-space bounding rect of a chip/display body (straddles rows e/f). */
+export interface BodyRect { x1: number; y1: number; x2: number; y2: number }
+
+/** Bounding rects of every chip/display on one board (for lift-side checks). */
+export function chipBodyRects(parts: PartInstance[], board: Breadboard): BodyRect[] {
+  const rects: BodyRect[] = [];
+  for (const part of parts) {
+    if (part.type !== 'chip' && part.type !== 'seg7') continue;
+    if (part.pins[0]?.board !== board.id) continue;
+    const cols = part.pins.map((h) => h.col);
+    const c1 = Math.min(...cols);
+    const c2 = Math.max(...cols);
+    rects.push({
+      x1: colX(board.kind, c1),
+      x2: colX(board.kind, c2),
+      y1: rowY(board.kind, 'e'),
+      y2: rowY(board.kind, 'f'),
+    });
+  }
+  return rects;
+}
+
+const chordHitsRect = (a: Pt, b: Pt, r: BodyRect, pad: number): boolean => {
+  for (let i = 0; i <= 16; i++) {
+    const t = i / 16;
+    const x = a.x + (b.x - a.x) * t;
+    const y = a.y + (b.y - a.y) * t;
+    if (x >= r.x1 - pad && x <= r.x2 + pad && y >= r.y1 - pad && y <= r.y2 + pad) return true;
+  }
+  return false;
+};
+
+/**
+ * Which bow side keeps a wire's arc clear of the chip bodies it grazes?
+ * Returns −1 when the default (left of from→to) arches over a body but the
+ * mirrored side is clear; undefined whenever the default is fine (including
+ * "both sides are blocked — interior columns cannot dodge, keep default").
+ */
+export function liftSideFor(a: Pt, b: Pt, rects: BodyRect[]): -1 | undefined {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 1 || rects.length === 0) return undefined;
+  if (!rects.some((r) => chordHitsRect(a, b, r, 2))) return undefined;
+  const h = Math.min(46, Math.max(8, 6 + 0.35 * dist));
+  const nx = dy / dist;
+  const ny = -dx / dist;
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const apexClear = (sign: number) => {
+    const px = mid.x + nx * sign * h * 0.7;
+    const py = mid.y + ny * sign * h * 0.7;
+    return !rects.some((r) => px > r.x1 - 4 && px < r.x2 + 4 && py > r.y1 - 4 && py < r.y2 + 4);
+  };
+  if (apexClear(1)) return undefined; // default side already dodges
+  if (apexClear(-1)) return -1;
+  return undefined; // wedged between bodies — default stays
+}
+
+/**
+ * Workbench-space point → chord space: x = fraction along a→b (0..1),
+ * y = px along the LEFT normal. Bends stored this way follow the endpoints
+ * when boards move.
+ */
+export function toChordSpace(a: Pt, b: Pt, p: Pt): { x: number; y: number } {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dist2 = dx * dx + dy * dy;
+  if (dist2 < 0.0001) return { x: 0, y: 0 };
+  const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / dist2;
+  const nx = dy / Math.sqrt(dist2);
+  const ny = -dx / Math.sqrt(dist2);
+  const off = (p.x - a.x) * nx + (p.y - a.y) * ny;
+  return { x: Math.min(1, Math.max(0, t)), y: off };
+}
+
+/** Inverse of toChordSpace. */
+export function fromChordSpace(a: Pt, b: Pt, c: { x: number; y: number }): Pt {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 0.001) return { ...a };
+  const nx = dy / dist;
+  const ny = -dx / dist;
+  return { x: a.x + dx * c.x + nx * c.y, y: a.y + dy * c.x + ny * c.y };
+}
+
+/**
+ * Manhattan route for a cross-board jumper: two bends that drop through the
+ * vertical gap between the boards (right edge of A's board → left edge of
+ * B's board), in chord space. null when the boards touch (no gap to use).
+ */
+export function gapRouteBends(
+  boards: Breadboard[],
+  from: HoleRef,
+  to: HoleRef,
+): { x: number; y: number }[] | null {
+  const ba = boards.find((x) => x.id === from.board);
+  const bb = boards.find((x) => x.id === to.board);
+  if (!ba || !bb || ba.id === bb.id) return null;
+  const ax = (ba.x ?? 0) + colX(ba.kind, from.col);
+  const ay = (ba.y ?? 0) + rowY(ba.kind, from.row);
+  const bx = (bb.x ?? 0) + colX(bb.kind, to.col);
+  const by = (bb.y ?? 0) + rowY(bb.kind, to.row);
+  const rightA = (ba.x ?? 0) + boardDims(ba.kind).width;
+  const leftB = bb.x ?? 0;
+  const rightB = (bb.x ?? 0) + boardDims(bb.kind).width;
+  const leftA = ba.x ?? 0;
+  // gap may sit either way round; pick the side pair that actually has a gap
+  const gapX = rightA < leftB ? (rightA + leftB) / 2 : rightB < leftA ? (rightB + leftA) / 2 : null;
+  if (gapX === null) return null;
+  const c1 = toChordSpace({ x: ax, y: ay }, { x: bx, y: by }, { x: gapX, y: ay });
+  const c2 = toChordSpace({ x: ax, y: ay }, { x: bx, y: by }, { x: gapX, y: by });
+  // keep the vertical leg between the endpoints' fractions
+  const lo = Math.min(c1.x, c2.x);
+  const hi = Math.max(c1.x, c2.x);
+  if (hi <= 0.02 || lo >= 0.98) return null;
+  return [c1, c2];
+}
+
 /**
  * Jumper-wire path: a quadratic arc that lifts off the board, magnitude
  * scaled by span (short hops stay flat, long jumpers arch higher).
  * `lift` overrides the auto height; its sign picks the bow side.
+ * `sign` (used when no lift is set) flips the default bow side — the canvas
+ * computes it from chip-body avoidance (see liftSideFor).
  * Cross-board spans (feature: multi-board) arch a bit higher.
  */
 export function wireArc(
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-  opts?: { lift?: number; crossBoard?: boolean },
+  a: Pt,
+  b: Pt,
+  opts?: { lift?: number; sign?: -1 | 1; crossBoard?: boolean },
 ): ArcPath {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -350,6 +473,7 @@ export function wireArc(
   let h = Math.min(46, Math.max(8, 6 + 0.35 * dist));
   if (opts?.crossBoard) h = Math.min(64, h + 14);
   if (opts?.lift !== undefined) h = Math.max(-60, Math.min(60, opts.lift));
+  else if (opts?.sign === -1) h = -h;
   // left normal of the from→to direction (screen space: bows up for L→R wires)
   const nx = dy / dist;
   const ny = -dx / dist;

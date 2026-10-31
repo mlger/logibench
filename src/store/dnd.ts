@@ -13,8 +13,8 @@ import type { HoleRef, PartInstance, PartType } from '@/lib/logibench/types';
  * useSyncExternalStore would treat each snapshot as changed and loop forever.
  */
 export interface DragPayload {
-  /** what is being dragged: a part (palette → board, or board → new spot) or a wire (hole → hole) */
-  kind: 'part' | 'wire';
+  /** what is being dragged: a part, a new wire (hole → hole), or a wire end being re-terminated */
+  kind: 'part' | 'wire' | 'wire-end';
   /** part drags: where the part came from */
   source?: 'palette' | 'board';
   type?: PartType;
@@ -24,6 +24,9 @@ export interface DragPayload {
   partId?: string;
   /** wire drags: the hole the wire starts from */
   hole?: HoleRef;
+  /** wire-end drags: which wire and which end is moving */
+  wireId?: string;
+  end?: 'from' | 'to';
   /** short label shown in the floating drag ghost, e.g. "7430", "330 Ω" */
   label: string;
 }
