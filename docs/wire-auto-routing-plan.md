@@ -1,9 +1,11 @@
 # Wire auto-routing & auto-bending — code analysis + proposal
 
-Status: **plan only, not implemented** (per user request).
+Status: **implemented** (R1–R3, R5–R8; R4/A\* deliberately deferred). Commits:
+`78178f5` (R7+R6 groundwork), `b44fc78` (R1+R8 bend editing), `6864806` (R2+R3+R5
+auto-router). Implementation notes & deviations from this plan are recorded in §3.1.
 Scope: `Wire { from, to, color, lift?, bends? }` rendering/routing UX. **Zero changes to the
 netlist, simulator, or ERC** — `bends` is visual-only (verified: `netlist.ts:84-86` unions only
-`w.from`/`w.to`). Line refs are HEAD `6cb128f`.
+`w.from`/`w.to`). Line refs were HEAD `6cb128f` at planning time.
 
 ---
 
@@ -115,6 +117,48 @@ unchanged.
 
 **R8 — Bend a11y (S).** Give bend handles `role="slider"` + `aria-valuenow`, arrow-key nudges
 in `PITCH/2` steps, Delete removes the bend — parity with the lift handle (`BreadboardCanvas.tsx:656-678`).
+
+## 3.1 Implementation record (deviations & notes)
+
+Shipped in `src/lib/logibench/route.ts` (pure) + store/canvas/Inspector/Palette wiring:
+
+- **R7** `sanitizeBends`: clamp x∈[0,1] y∈[−200,200], dedupe, collinear cleanup (chord-length
+  scaled), cap 8. Wired into `updateWire`, `addWireBend`, `migrateProject`. *Deviation:* a
+  single surviving bend is kept — one-bend L routes are legitimate (plan said drop <2).
+- **R6** `Wire.route?: 'gap' | 'auto'` (additive, schema 2 unchanged; `migrateProject`
+  preserves it). `moveBoard` recomputes 'gap' routes; `updateWire` recomputes on
+  re-termination; both via `recomputeRoutePatch(w, project)`. *Extra:* a same-row gap route
+  collapses onto the chord — it degrades to a plain arc instead of storing zero-offset bends.
+- **R1** add/remove bends for **all** wires: double-click a wire inserts a grid-snapped bend
+  (`snapChordBend` — hole column ±3 px, hole row center ±3 px); double-click a bend handle or
+  drag it onto the chord (< 4 px) removes it; Inspector "Add bend" for touch. Hand-edited
+  routes lose provenance (`route` cleared → manual).
+- **R8** bend handles: `role="slider"`, `aria-valuetext`, ArrowUp/Down nudge PITCH/2
+  (screen-correct sign), Left/Right one pitch along the chord, Delete/Backspace removes.
+- **R2** `autoRoute` toggle (Palette, default **on**, incl. same-board — safe because of the
+  reject-to-arc rule below) + honest preview: `WireDragLayer` renders the committed route
+  shape (dashed polyline + bend dots) whenever the pointer is near a hole; suggestion
+  recomputed only on hover-hole change, never per pointer-move. *Deviation:* no cache — the
+  router is cheap at this scale (≤ 63×14 grid, few dozen wires).
+- **R3** `suggestRoute(project, from, to)`: cross-board → gap route (sanitized, collapse →
+  arc); same-board chord grazing a chip/seg7 body → real-quadratic sampling both bow sides
+  (`quadClear`, supersedes the chord-only `liftSideFor` for suggestions) → both dirty →
+  Manhattan L/Z through the chip-free channel column nearest the chord midpoint, bends on
+  hole centers, waypoints projecting off-chord rejected, occupied bend holes avoided;
+  otherwise auto arc. Never returns something worse than today's arc.
+- **R5** tiering: new arcs joining a near-parallel bundle (|sin| ≤ 0.14, apex within 9 px —
+  plan said 7; grid-quantized chords sit ~8 px apart) get the first clear lift rung
+  (h+14/−14/±28/±42, cap ±60). Inspector "De-collide" re-rungs a whole cluster
+  (`decollideLifts`) in one commit — manual lifts are re-rung too (indistinguishable from
+  tiered ones); explicit action + single undo.
+- **R4 (A\*)** intentionally **not** built — the heuristic covered every demo corridor tested;
+  revisit only if real circuits outgrow it.
+
+E2E (agent-browser): dblclick add bend ✓, drag-onto-chord removal ✓, ArrowDown nudge −8 px ✓,
+band-crossing wire routed (col 12, between 7447 and 5161AS) with matching preview ✓,
+Lab 3 gap route re-threaded after `moveBoard` (fractions 0.762→0.746) ✓, Lab 2 De-collide
+[30,16,4,−18] → 4 distinct rungs ✓, Simulate golden path (switch A → segments b+c) ✓, demos
+render unchanged ✓, `dev.log` clean ✓, `bun run lint` + `bun run audit` 21/21 ✓.
 
 ## 4. Rejected alternatives
 
