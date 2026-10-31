@@ -122,10 +122,16 @@ export function buildNetlist(project: Project, opts?: { switchStates?: Map<strin
     holeNet.set(h, netOfNode.get(uf.find(node.get(h)!))!);
   }
 
-  // attach part pins (and the O(1) pin→net index)
+  // attach part pins (and the O(1) pin→net index).
+  // A chip inserted backwards (props.reversed) swaps its pin mapping: the hole
+  // holding "pin 1" physically contacts pin N, so pin numbers flip around the
+  // package — everything downstream (power checks, gate models, ERC) then
+  // reacts to the backwards chip exactly as the real bench would.
   for (const part of project.parts) {
+    const flip = part.type === 'chip' && part.props.reversed === true;
+    const pinTotal = part.pins.length;
     part.pins.forEach((h, idx) => {
-      const pin = idx + 1;
+      const pin = flip ? pinTotal - idx : idx + 1;
       const netId = holeNet.get(holeKey(h));
       if (netId === undefined) return;
       const np: NetPin = { partId: part.id, type: part.type, pin, hole: h };

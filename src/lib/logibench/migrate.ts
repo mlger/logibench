@@ -159,6 +159,7 @@ export function migrateProject(raw: unknown): MigrationResult | null {
       const volts = num(rp2.volts); if (volts !== undefined && volts > 0 && volts <= 24) props.volts = volts;
       const freqHz = num(rp2.freqHz); if (freqHz !== undefined && freqHz > 0) props.freqHz = freqHz;
       const duty = num(rp2.duty); if (duty !== undefined && duty >= 0 && duty <= 1) props.duty = duty;
+      if (type === 'chip' && rp2.reversed === true) props.reversed = true;
     }
     const family = str(rp.family, 8);
     parts.push({
@@ -181,7 +182,22 @@ export function migrateProject(raw: unknown): MigrationResult | null {
       id = `w${wires.length + 1}-${Date.now().toString(36).slice(-3)}`;
     }
     const color = typeof rw.color === 'string' && /^#[0-9a-f]{3,8}$/i.test(rw.color) ? rw.color : '#27272a';
-    wires.push({ id, from: rw.from, to: rw.to, color });
+    // arc-height override (±60 px, signed) and normalized bend points
+    const lift = num(rw.lift);
+    const bends = Array.isArray(rw.bends)
+      ? rw.bends
+          .filter((bp: unknown) => isObj(bp) && num((bp as Record<string, unknown>).x) !== undefined && num((bp as Record<string, unknown>).y) !== undefined)
+          .slice(0, 8)
+          .map((bp: Record<string, unknown>) => ({
+            x: Math.min(1, Math.max(0, num(bp.x)!)),
+            y: Math.max(-200, Math.min(200, num(bp.y)!)),
+          }))
+      : undefined;
+    wires.push({
+      id, from: rw.from, to: rw.to, color,
+      ...(lift !== undefined ? { lift } : {}),
+      ...(bends && bends.length ? { bends } : {}),
+    });
   }
 
   return {

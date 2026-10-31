@@ -5,7 +5,7 @@ import type {
   HoleRef, PartInstance, PartType, Project, SimResult, Wire,
 } from '@/lib/logibench/types';
 import {
-  ALL_ROWS, BOARD_SPECS, boardDims, checkPlacement, holeExists, holeKey, pinCount, sameHole,
+  ALL_ROWS, BOARD_SPECS, boardDims, checkPlacement, holeExists, holeKey, pinCount, sameHole, wireColorFor,
 } from '@/lib/logibench/geometry';
 import { buildNetlistCached } from '@/lib/logibench/netlist';
 import { Simulator } from '@/lib/logibench/sim';
@@ -38,8 +38,12 @@ export interface EditorState {
   running: boolean;
   simResult: SimResult | null;
   hoverHole: string | null;
+  /** holeKey the ERC panel wants the canvas to pulse (issue deep-link) */
+  ercFocus: string | null;
   projectId: string | null; // saved project id (backend)
   wireColor: string;
+  /** bench-convention assist: leads touching a + rail go red, a − rail black */
+  autoColor: boolean;
   /** transient user-facing message (e.g. rejected wire drop) */
   flash: string | null;
   /** live (non-persisted) switch/button states while simulating */
@@ -47,6 +51,8 @@ export interface EditorState {
 
   setFlash: (msg: string | null) => void;
   setWireColor: (c: string) => void;
+  setAutoColor: (v: boolean) => void;
+  setErcFocus: (key: string | null) => void;
 
   setName: (name: string) => void;
   commit: (mutate: (p: Project) => void) => void;
@@ -62,8 +68,8 @@ export interface EditorState {
   select: (sel: Selection) => void;
   deleteSelection: () => void;
   updatePart: (id: string, props: Partial<PartInstance['props']>) => void;
-  /** wire tweaks from the Inspector/canvas (lift, color) */
-  updateWire: (id: string, props: Partial<Pick<Wire, 'lift' | 'color'>>) => void;
+  /** wire tweaks from the Inspector/canvas (lift, color, re-termination) */
+  updateWire: (id: string, props: Partial<Pick<Wire, 'lift' | 'color' | 'from' | 'to'>>) => void;
   /** drag-and-drop: move an existing part so its first pin lands on `anchor` */
   movePart: (id: string, anchor: HoleRef) => void;
   /** drag-to-trash: remove a placed part entirely */
@@ -120,12 +126,16 @@ export const useEditor = create<EditorState>((set, get) => ({
   hoverHole: null,
   projectId: null,
   wireColor: '#ea580c',
+  autoColor: true,
+  ercFocus: null,
   flash: null,
   liveSwitches: {},
 
   setFlash: (msg) => set({ flash: msg }),
 
   setWireColor: (c) => set({ wireColor: c }),
+  setAutoColor: (v) => set({ autoColor: v }),
+  setErcFocus: (key) => set({ ercFocus: key }),
 
   setName: (name) => get().commit((p) => { p.name = name; }),
 
@@ -259,7 +269,10 @@ export const useEditor = create<EditorState>((set, get) => ({
       set({ flash: 'That\u2019s a gap in the rail — bare plastic, nothing to plug into. Use a hole inside a group.' });
       return;
     }
-    const w: Wire = { id: nextId('w'), from, to, color: color ?? get().wireColor };
+    const w: Wire = {
+      id: nextId('w'), from, to,
+      color: color ?? (get().autoColor ? wireColorFor(from, to) : undefined) ?? get().wireColor,
+    };
     get().commit((p) => { p.wires.push(w); });
     set({ selection: { kind: 'wire', id: w.id } });
   },
@@ -393,7 +406,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     simulator = null;
     set({
       project: p, past: [], future: [], selection: null, placement: null,
-      wireStart: null, projectId: null,
+      wireStart: null, projectId: null, ercFocus: null,
     });
     setTimeout(() => get().runSim(), 0);
   },
@@ -402,7 +415,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     simulator = null;
     set({
       project: emptyProject(), past: [], future: [], selection: null,
-      placement: null, wireStart: null, projectId: null, simResult: null,
+      placement: null, wireStart: null, projectId: null, ercFocus: null, simResult: null,
     });
   },
 
@@ -412,7 +425,7 @@ export const useEditor = create<EditorState>((set, get) => ({
     simulator = null;
     set({
       project: m.project, past: [], future: [], selection: null, placement: null,
-      wireStart: null, projectId: null,
+      wireStart: null, projectId: null, ercFocus: null,
     });
     setTimeout(() => get().runSim(), 0);
   },

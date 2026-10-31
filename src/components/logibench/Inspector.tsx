@@ -11,6 +11,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Trash2, Info, Copy } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import { nearestESeries, formatOhms } from '@/lib/logibench/eseries';
 
 const SECTION = 'text-xs font-semibold uppercase tracking-wider text-stone-500';
@@ -299,6 +300,23 @@ export default function Inspector() {
             + terminal (red) → + net, − terminal (dark) → − net. Multiple supplies are fine on separate nets —
             paralleling different voltages on one net is a short (ERC errors).
           </p>
+        </div>
+      )}
+
+      {part?.type === 'chip' && (
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-stone-200 bg-white p-3">
+          <div>
+            <Label className="text-[11px] text-stone-500">Inserted backwards</Label>
+            <p className="mt-1 text-[11px] leading-snug text-stone-500">
+              DIP seated 180° — pin 1 sits where pin {def?.pins.length ?? '?'} belongs.
+              The ERC flags it and the sim flips the pin map, exactly like the bench.
+            </p>
+          </div>
+          <Switch
+            checked={part.props.reversed === true}
+            onCheckedChange={(v) => updatePart(part.id, { reversed: v })}
+            aria-label="Chip inserted backwards"
+          />
         </div>
       )}
 

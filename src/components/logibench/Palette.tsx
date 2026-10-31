@@ -6,6 +6,7 @@ import { beginDragTracking } from './drag';
 import { CHIP_DEFS, getChipDef } from '@/data/chips';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { WIRE_COLORS } from '@/lib/logibench/demo';
+import { Switch } from '@/components/ui/switch';
 import { Cpu, Grid3x3, Lightbulb, ToggleLeft, Circle, Power, Timer, MousePointerClick, Spline, GripHorizontal } from 'lucide-react';
 
 const SECTION = 'text-xs font-semibold uppercase tracking-wider text-stone-500';
@@ -28,6 +29,8 @@ export default function Palette() {
   const setMode = useEditor((s) => s.setMode);
   const wireColor = useEditor((s) => s.wireColor);
   const setWireColor = useEditor((s) => s.setWireColor);
+  const autoColor = useEditor((s) => s.autoColor);
+  const setAutoColor = useEditor((s) => s.setAutoColor);
   const project = useEditor((s) => s.project);
 
   const simChips = CHIP_DEFS.filter((c) => !c.refOnly);
@@ -66,18 +69,24 @@ export default function Palette() {
         {mode === 'wire' && (
           <div className="mt-2 rounded-lg border border-stone-200 bg-white p-2">
             <div className="text-[11px] font-medium text-stone-500">Wire color — drag hole→hole, or click two holes</div>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {Object.entries(WIRE_COLORS).map(([name, hex]) => (
-                <button
-                  key={name}
-                  type="button"
-                  title={name}
-                  aria-label={`wire color ${name}`}
-                  onClick={() => setWireColor(hex)}
-                  className={`h-5 w-5 rounded-full border-2 ${wireColor === hex ? 'border-stone-900' : 'border-transparent'}`}
-                  style={{ backgroundColor: hex }}
-                />
-              ))}
+            <div className="mt-1.5 flex items-center justify-between gap-2">
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(WIRE_COLORS).map(([name, hex]) => (
+                  <button
+                    key={name}
+                    type="button"
+                    title={name}
+                    aria-label={`wire color ${name}`}
+                    onClick={() => setWireColor(hex)}
+                    className={`h-5 w-5 rounded-full border-2 ${wireColor === hex ? 'border-stone-900' : 'border-transparent'}`}
+                    style={{ backgroundColor: hex }}
+                  />
+                ))}
+              </div>
+              <label className="flex shrink-0 items-center gap-1.5 text-[10px] text-stone-500" title="Leads touching a + rail turn red, a − rail black — the bench convention. Signal wires keep your picked color.">
+                <span>Auto power</span>
+                <Switch checked={autoColor} onCheckedChange={setAutoColor} aria-label="Auto power-wire color" />
+              </label>
             </div>
           </div>
         )}

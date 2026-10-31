@@ -93,6 +93,16 @@ export function runErc(ctx: ErcContext): SimIssue[] {
     if (part.type !== 'chip' || !part.defId) continue;
     const def = getChipDef(part.defId);
     if (!def || def.refOnly) continue;
+    if (part.props.reversed) {
+      issues.push({
+        id: nid(), rule: 'chip-reversed', severity: 'error',
+        title: `${label(part)} is inserted BACKWARDS — pin 1 is at the wrong end`,
+        detail: `A DIP seated 180° puts pin 1 where pin ${def.pins.length} belongs, so power (pins ${def.power.vcc} / ${def.power.gnd}), inputs and outputs all land on the wrong strips. Pull the chip, turn it 180° so the notch marks pin ${def.pins.length} at the opposite end from pin 1, and reseat.`,
+        why: 'On the bench a backwards chip gets VCC and GND reversed — it heats within seconds and dies. The simulator mirrors the bench: the pin map is flipped, the chip reads unpowered, and nothing downstream behaves.',
+        refs: [{ partId: part.id, pin: 1 }, { partId: part.id, pin: def.pins.length }],
+      });
+      continue;
+    }
     if (powered.get(part.id)) continue;
     const pv = netlist.pinNet(part.id, def.power.vcc);
     const pg = netlist.pinNet(part.id, def.power.gnd);
@@ -119,6 +129,7 @@ export function runErc(ctx: ErcContext): SimIssue[] {
     if (part.type !== 'chip' || !part.defId) continue;
     const def = getChipDef(part.defId);
     if (!def || def.refOnly || !powered.get(part.id)) continue;
+    if (part.props.reversed) continue; // root cause already reported by chip-reversed
     const family = part.family ?? def.families[0];
     const fam = FAMILIES[family];
     if (!fam) continue;
@@ -197,6 +208,7 @@ export function runErc(ctx: ErcContext): SimIssue[] {
     if (part.type !== 'chip' || !part.defId) continue;
     const def = getChipDef(part.defId);
     if (!def || def.refOnly) continue;
+    if (part.props.reversed) continue; // root cause already reported by chip-reversed
     for (const pin of def.pins) {
       if (pin.dir !== 'out') continue;
       const net = netlist.pinNet(part.id, pin.num);
@@ -254,6 +266,40 @@ export function runErc(ctx: ErcContext): SimIssue[] {
           refs: [{ partId }],
         });
         break;
+      }
+    }
+  }
+
+  /* --- rule: pull resistor outside the TTL input budget ---
+     LS inputs sink 0.4 mA when LOW (IIL): a pull-down must hold the pin below
+     VIL 0.8 V, so R ≤ 2.2 kΩ. Pull-UPS on TTL are unconstrained in practice
+     (IIH is only 20 µA), and CMOS leakage is µA — only the TTL pull-down is
+     tight enough to get wrong. --- */
+  {
+    const fmtOhms = (v: number) => (v >= 1000 ? `${Number.isInteger(v / 1000) ? v / 1000 : (v / 1000).toFixed(1)} kΩ` : `${v} Ω`);
+    for (const part of project.parts) {
+      if (part.type !== 'chip' || !part.defId) continue;
+      const def = getChipDef(part.defId);
+      if (!def || def.refOnly || !powered.get(part.id)) continue;
+      if (part.props.reversed) continue;
+      const family = part.family ?? def.families[0];
+      if (family !== 'LS') continue;
+      for (const pin of def.pins) {
+        if (pin.dir !== 'in') continue;
+        const net = netlist.pinNet(part.id, pin.num);
+        if (net === undefined) continue;
+        for (const r of nets[net].resistors) {
+          const other = nets[r.net];
+          if (!other || other.isVccRail) continue;
+          if (!other.isGndRail || r.ohms <= 2200) continue;
+          issues.push({
+            id: nid(), rule: 'weak-pull', severity: 'warning',
+            title: `${fmtOhms(r.ohms)} pull-down on ${label(part)} pin ${pin.num} (${pin.name}) is too weak for LS`,
+            detail: 'A 74LS input sinks 0.4 mA when LOW (IIL). The pull-down must keep the pin below VIL 0.8 V, so R ≤ 2.2 kΩ (0.4 mA × 2 kΩ = 0.8 V). Use 1 kΩ — the demos do.',
+            why: 'A too-large pull-down lets the input sit in the indeterminate region between VIL and VIH: gates switch randomly with temperature and noise.',
+            refs: [{ partId: part.id, pin: pin.num }],
+          });
+        }
       }
     }
   }

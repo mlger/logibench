@@ -159,6 +159,8 @@ export interface PartProps {
   // 555 module
   freqHz?: number;
   duty?: number;
+  /** chips only: DIP inserted 180° rotated — pin 1 sits where pin N should be */
+  reversed?: boolean;
 }
 
 export interface Wire {

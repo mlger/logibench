@@ -154,6 +154,23 @@ export function sameHole(a: HoleRef, b: HoleRef): boolean {
   return a.board === b.board && a.col === b.col && a.row === b.row;
 }
 
+/** Bench color convention (mirrors WIRE_COLORS in demo.ts — geometry cannot import it). */
+export const WIRE_COLOR_PLUS = '#dc2626'; // red
+export const WIRE_COLOR_MINUS = '#27272a'; // black
+
+/**
+ * Smart wire color: a lead touching a + rail is red, one touching a − rail is
+ * black — the convention every demo follows by hand. Returns undefined for
+ * signal wires so the caller falls back to the user's picked color.
+ */
+export function wireColorFor(a: HoleRef, b: HoleRef): string | undefined {
+  const plus = (r: RowName) => r === '+T' || r === '+B';
+  const minus = (r: RowName) => r === '-T' || r === '-B';
+  if (plus(a.row) || plus(b.row)) return WIRE_COLOR_PLUS;
+  if (minus(a.row) || minus(b.row)) return WIRE_COLOR_MINUS;
+  return undefined;
+}
+
 /* ---------------- Footprints ---------------- */
 
 export interface Footprint {
