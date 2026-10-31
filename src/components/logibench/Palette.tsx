@@ -31,6 +31,8 @@ export default function Palette() {
   const setWireColor = useEditor((s) => s.setWireColor);
   const autoColor = useEditor((s) => s.autoColor);
   const setAutoColor = useEditor((s) => s.setAutoColor);
+  const autoRoute = useEditor((s) => s.autoRoute);
+  const setAutoRoute = useEditor((s) => s.setAutoRoute);
   const project = useEditor((s) => s.project);
 
   const simChips = CHIP_DEFS.filter((c) => !c.refOnly);
@@ -83,10 +85,16 @@ export default function Palette() {
                   />
                 ))}
               </div>
-              <label className="flex shrink-0 items-center gap-1.5 text-[10px] text-stone-500" title="Leads touching a + rail turn red, a − rail black — the bench convention. Signal wires keep your picked color.">
-                <span>Auto power</span>
-                <Switch checked={autoColor} onCheckedChange={setAutoColor} aria-label="Auto power-wire color" />
-              </label>
+              <div className="flex shrink-0 flex-col gap-1">
+                <label className="flex items-center justify-end gap-1.5 text-[10px] text-stone-500" title="Leads touching a + rail turn red, a − rail black — the bench convention. Signal wires keep your picked color.">
+                  <span>Auto power</span>
+                  <Switch checked={autoColor} onCheckedChange={setAutoColor} aria-label="Auto power-wire color" />
+                </label>
+                <label className="flex items-center justify-end gap-1.5 text-[10px] text-stone-500" title="New wires take the best route automatically: Manhattan through the board gap, L/Z around chips, tiered arcs in bundles.">
+                  <span>Auto route</span>
+                  <Switch checked={autoRoute} onCheckedChange={setAutoRoute} aria-label="Auto-route new wires" />
+                </label>
+              </div>
             </div>
           </div>
         )}

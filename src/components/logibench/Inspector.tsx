@@ -201,7 +201,7 @@ export default function Inspector() {
         </div>
         <div>
           <Label className="text-[11px] text-stone-500">Route</Label>
-          <div className={`mt-1.5 grid gap-1.5 ${crossBoard ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          <div className={`mt-1.5 grid grid-cols-2 gap-1.5`}>
             <Button
               variant="outline" size="sm"
               title="Insert a bend at the middle of the wire — or double-click the wire on the canvas; drag bends to route around parts"
@@ -209,7 +209,14 @@ export default function Inspector() {
             >
               <Route className="h-3.5 w-3.5" /> Add bend
             </Button>
-            {crossBoard && (
+            <Button
+              variant="outline" size="sm"
+              title="Re-run the auto-router: via the board gap, L/Z around chips, or a tiered arc"
+              onClick={() => useEditor.getState().autoRouteWire(wire.id)}
+            >
+              <Route className="h-3.5 w-3.5" /> Auto route
+            </Button>
+            {crossBoard ? (
               <Button
                 variant="outline" size="sm"
                 title="Bend the jumper through the gap between the boards (drag the bend points on the canvas)"
@@ -223,6 +230,14 @@ export default function Inspector() {
                 }}
               >
                 <Route className="h-3.5 w-3.5" /> Via gap
+              </Button>
+            ) : (
+              <Button
+                variant="outline" size="sm"
+                title="Stagger the arc heights of this wire and its parallel neighbours so they stop overlapping"
+                onClick={() => useEditor.getState().decollideBundle(wire.id)}
+              >
+                <Route className="h-3.5 w-3.5" /> De-collide
               </Button>
             )}
             <Button
@@ -423,7 +438,7 @@ export default function Inspector() {
         </div>
       )}
 
-      {def && !def.refOnly && (
+      {def && !def.refOnly && part && (
         <div className="rounded-lg border border-stone-200 bg-stone-50 p-3">
           <div className={SECTION}>Power</div>
           <p className="mt-1 font-mono text-[11px] text-stone-600">

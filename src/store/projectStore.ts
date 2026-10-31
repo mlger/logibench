@@ -7,7 +7,7 @@ import type {
 import {
   ALL_ROWS, BOARD_SPECS, boardDims, checkPlacement, holeExists, holeKey, pinCount, sameHole, wireColorFor,
 } from '@/lib/logibench/geometry';
-import { holeWorkbenchPos, recomputeRoutePatch, sanitizeBends, snapChordBend } from '@/lib/logibench/route';
+import { decollideLifts, holeWorkbenchPos, recomputeRoutePatch, sanitizeBends, snapChordBend, suggestRoute } from '@/lib/logibench/route';
 import { buildNetlistCached } from '@/lib/logibench/netlist';
 import { autoPowerWires } from '@/lib/logibench/autowire';
 import { Simulator } from '@/lib/logibench/sim';
@@ -46,6 +46,8 @@ export interface EditorState {
   wireColor: string;
   /** bench-convention assist: leads touching a + rail go red, a − rail black */
   autoColor: boolean;
+  /** R2: new wires take the best route automatically (via gap / L/Z / tiered arc) */
+  autoRoute: boolean;
   /** transient user-facing message (e.g. rejected wire drop) */
   flash: string | null;
   /** live (non-persisted) switch/button states while simulating */
@@ -54,6 +56,7 @@ export interface EditorState {
   setFlash: (msg: string | null) => void;
   setWireColor: (c: string) => void;
   setAutoColor: (v: boolean) => void;
+  setAutoRoute: (v: boolean) => void;
   setErcFocus: (key: string | null) => void;
 
   setName: (name: string) => void;
@@ -76,6 +79,10 @@ export interface EditorState {
   addWireBend: (id: string, c: { x: number; y: number }) => void;
   /** R1: remove one bend by index; collapses back to a plain arc when empty */
   removeWireBend: (id: string, idx: number) => void;
+  /** R3: re-run the router for one existing wire (Inspector action) */
+  autoRouteWire: (id: string) => void;
+  /** R5: re-tier the parallel bundle a wire belongs to (Inspector action) */
+  decollideBundle: (id: string) => void;
   /** one-click power wiring for the selected chip / 555 module */
   wireChipPower: (partId: string) => void;
   /** drag-and-drop: move an existing part so its first pin lands on `anchor` */
@@ -135,6 +142,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   projectId: null,
   wireColor: '#ea580c',
   autoColor: true,
+  autoRoute: true,
   ercFocus: null,
   flash: null,
   liveSwitches: {},
@@ -143,6 +151,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   setWireColor: (c) => set({ wireColor: c }),
   setAutoColor: (v) => set({ autoColor: v }),
+  setAutoRoute: (v) => set({ autoRoute: v }),
   setErcFocus: (key) => set({ ercFocus: key }),
 
   setName: (name) => get().commit((p) => { p.name = name; }),
@@ -281,6 +290,20 @@ export const useEditor = create<EditorState>((set, get) => ({
       id: nextId('w'), from, to,
       color: color ?? (get().autoColor ? wireColorFor(from, to) : undefined) ?? get().wireColor,
     };
+    // R2/R3: the router picks the shape at drop — via gap, L/Z around chips, or tiered arc
+    if (get().autoRoute) {
+      const sug = suggestRoute(project, from, to);
+      if (sug?.kind === 'bends') {
+        const a = holeWorkbenchPos(project.boards, from);
+        const b = holeWorkbenchPos(project.boards, to);
+        w.bends = sanitizeBends(sug.bends, { dist: Math.hypot(b.x - a.x, b.y - a.y) });
+        if (w.bends) w.route = sug.route;
+        else delete w.bends;
+      } else if (sug?.kind === 'arc' && sug.lift !== undefined) {
+        w.lift = sug.lift;
+        w.route = 'auto';
+      }
+    }
     get().commit((p) => { p.wires.push(w); });
     set({ selection: { kind: 'wire', id: w.id } });
   },
@@ -323,7 +346,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       }
       // R6: computed routes follow re-termination (manual bends are kept as-is)
       if (props.from !== undefined || props.to !== undefined) {
-        Object.assign(w, recomputeRoutePatch(w, p.boards));
+        Object.assign(w, recomputeRoutePatch(w, p));
       }
     });
   },
@@ -359,6 +382,46 @@ export const useEditor = create<EditorState>((set, get) => ({
       } else {
         delete w.bends;
         delete w.route;
+      }
+    });
+  },
+
+  decollideBundle: (id) => {
+    const lifts = decollideLifts(get().project, id);
+    if (!lifts) {
+      set({ flash: 'No parallel arc bundle to de-collide here.' });
+      return;
+    }
+    get().commit((p) => {
+      for (const { id: wid, lift } of lifts) {
+        const w = p.wires.find((x) => x.id === wid);
+        if (w) w.lift = lift;
+      }
+    });
+    set({ flash: 'Bundle re-tiered — each parallel jumper got its own arc height.' });
+  },
+
+  autoRouteWire: (id) => {
+    const p = get().project;
+    const w = p.wires.find((x) => x.id === id);
+    if (!w) return;
+    const sug = suggestRoute(p, w.from, w.to);
+    if (!sug) return;
+    get().commit((proj) => {
+      const w2 = proj.wires.find((x) => x.id === id);
+      if (!w2) return;
+      if (sug.kind === 'bends') {
+        w2.bends = sug.bends;
+        w2.route = sug.route;
+      } else {
+        delete w2.bends;
+        if (sug.lift !== undefined) {
+          w2.lift = sug.lift;
+          w2.route = 'auto';
+        } else {
+          delete w2.lift;
+          delete w2.route;
+        }
       }
     });
   },
@@ -596,7 +659,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       // R6: via-gap routes re-thread through the gap at the new board position
       for (const w of p.wires) {
         if (w.route !== 'gap' || (w.from.board !== id && w.to.board !== id)) continue;
-        Object.assign(w, recomputeRoutePatch(w, p.boards));
+        Object.assign(w, recomputeRoutePatch(w, p));
       }
     });
   },

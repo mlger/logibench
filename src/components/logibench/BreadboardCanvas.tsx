@@ -13,6 +13,7 @@ import { useDnd } from '@/store/dnd';
 import { beginDragTracking } from './drag';
 import { getChipDef } from '@/data/chips';
 import { resistorBands } from '@/lib/logibench/eseries';
+import { snapChordBend, suggestRoute } from '@/lib/logibench/route';
 import { Trash2 } from 'lucide-react';
 import type { Mode, PlacementState, Selection } from '@/store/projectStore';
 
@@ -745,9 +746,14 @@ function CanvasInner(props: Props & { initialScale: number }) {
             );
           })}
 
-          {/* live rubber-band while dragging a wire from a hole */}
+          {/* live rubber-band while dragging a wire from a hole — previews the
+              route the router will actually commit (R2: honest preview) */}
           {wireDrag?.hole && (
-            <WireDragLayer svgRef={svgRef} view={view} origin={wireDrag.hole} pos={pos} color={wireColor} />
+            <WireDragLayer
+              svgRef={svgRef} view={view} origin={wireDrag.hole} pos={pos} color={wireColor}
+              project={project}
+              hover={dndHoverKey ? parseHoleKey(dndHoverKey) : null}
+            />
           )}
 
           {/* board headers — above the wires so jumper arcs never shadow the grip */}
@@ -923,13 +929,20 @@ function CanvasInner(props: Props & { initialScale: number }) {
  * pointermove listener (state updates come from the event handler, never
  * the effect body) and only mounts while a wire drag is active, so the
  * rest of the canvas never re-renders per pointer-move.
+ *
+ * R2: when the pointer is near a hole, the preview shows the route the
+ * auto-router will commit (arc with tier lift, or Manhattan bends) instead
+ * of a generic arc. The suggestion is recomputed only when the hovered hole
+ * changes — never per pointer-move.
  */
-function WireDragLayer({ svgRef, view, origin, pos, color }: {
+function WireDragLayer({ svgRef, view, origin, pos, color, project, hover }: {
   svgRef: React.RefObject<SVGSVGElement | null>;
   view: { x: number; y: number; scale: number };
   origin: HoleRef;
   pos: (h: HoleRef) => { x: number; y: number };
   color: string;
+  project: Project;
+  hover: HoleRef | null;
 }) {
   const payload = useDnd((s) => s.payload);
   const [pt, setPt] = useState<{ x: number; y: number } | null>(null);
@@ -947,9 +960,29 @@ function WireDragLayer({ svgRef, view, origin, pos, color }: {
     return () => window.removeEventListener('pointermove', onMove);
   }, [active, view, svgRef]);
 
+  const suggestion = useMemo(() => {
+    if (!active || !hover || sameHole(hover, origin)) return null;
+    return suggestRoute(project, origin, hover);
+  }, [active, hover, origin, project]);
+
   if (!active || !pt) return null;
   const a = pos(origin);
-  const { d } = wireArc(a, pt);
+  if (suggestion?.kind === 'bends' && hover) {
+    const bEnd = pos(hover);
+    const bendPts = suggestion.bends.map((c) => fromChordSpace(a, bEnd, c));
+    const d = `M ${a.x} ${a.y} ${bendPts.map((p) => `L ${p.x} ${p.y} `).join('')}L ${bEnd.x} ${bEnd.y}`;
+    return (
+      <g pointerEvents="none" aria-hidden>
+        <path d={d} fill="none" stroke={color} strokeWidth={3} strokeDasharray="7 5" strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
+        {bendPts.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={3} fill="#fff" stroke={color} strokeWidth={1.5} opacity={0.9} />
+        ))}
+        <circle cx={bEnd.x} cy={bEnd.y} r={3.5} fill={color} opacity={0.9} />
+      </g>
+    );
+  }
+  const lift = suggestion?.kind === 'arc' ? suggestion.lift : undefined;
+  const { d } = wireArc(a, pt, { lift });
   return (
     <g pointerEvents="none" aria-hidden>
       <path d={d} fill="none" stroke={color} strokeWidth={3} strokeDasharray="7 5" strokeLinecap="round" opacity={0.9} />
