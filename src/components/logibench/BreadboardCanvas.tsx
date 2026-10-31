@@ -115,7 +115,9 @@ function CanvasInner(props: Props & { initialScale: number }) {
     window.addEventListener('pointerup', onUp);
   }, [svgRef]);
 
-  /** drag a Manhattan bend point; commits the normalized chord-space position */
+  /** drag a Manhattan bend point; commits the normalized chord-space position.
+   *  Dropping the bend onto the chord (|y| < 4 px) removes it; commits snap to
+   *  the hole grid when close (R1). */
   const beginBendDrag = useCallback((id: string, idx: number, a: { x: number; y: number }, b: { x: number; y: number }, e: React.PointerEvent) => {
     e.stopPropagation();
     const svg = svgRef.current;
@@ -133,10 +135,15 @@ function CanvasInner(props: Props & { initialScale: number }) {
       window.removeEventListener('pointerup', onUp);
       setBendDrag((bd) => {
         if (bd) {
-          const w = useEditor.getState().project.wires.find((x) => x.id === bd.id);
-          const bends = [...(w?.bends ?? [])];
-          bends[bd.idx] = { x: bd.x, y: bd.y };
-          useEditor.getState().updateWire(bd.id, { bends });
+          const st = useEditor.getState();
+          if (Math.abs(bd.y) < 4) {
+            st.removeWireBend(bd.id, bd.idx);
+          } else {
+            const w = st.project.wires.find((x) => x.id === bd.id);
+            const bends = [...(w?.bends ?? [])];
+            bends[bd.idx] = snapChordBend({ x: bd.x, y: bd.y }, a, b, st.project.boards);
+            st.updateWire(bd.id, { bends });
+          }
         }
         return null;
       });
@@ -652,6 +659,17 @@ function CanvasInner(props: Props & { initialScale: number }) {
                   d={d} fill="none" stroke="transparent" strokeWidth={11} strokeLinecap="round"
                   style={{ cursor: 'pointer' }}
                   onClick={(e) => { e.stopPropagation(); props.onWireClick(w.id); }}
+                  onDoubleClick={(e) => {
+                    // R1: double-click a wire to insert a grid-snapped bend there
+                    e.stopPropagation();
+                    if (running) return;
+                    const svg = svgRef.current;
+                    if (!svg) return;
+                    const rect = svg.getBoundingClientRect();
+                    const v = viewRef.current;
+                    const p = { x: (e.clientX - rect.left - v.x) / v.scale, y: (e.clientY - rect.top - v.y) / v.scale };
+                    useEditor.getState().addWireBend(w.id, toChordSpace(a, b, p));
+                  }}
                 />
                 {selected && arc && (
                   <g
@@ -678,15 +696,48 @@ function CanvasInner(props: Props & { initialScale: number }) {
                 )}
                 {selected && hasBends && bendsLive!.map((c, i) => {
                   const p = fromChordSpace(a, b, c);
+                  const chordDist = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
+                  // screen-correct vertical nudging: chord +y runs along the left
+                  // normal, which points up only for left→right chords
+                  const upSign = (-(b.x - a.x) / chordDist) < 0 ? 1 : -1;
+                  const nudge = (dx: number, dy: number) => {
+                    const st = useEditor.getState();
+                    const cur = st.project.wires.find((x) => x.id === w.id)?.bends?.[i];
+                    if (!cur) return;
+                    st.updateWire(w.id, {
+                      bends: bendsLive!.map((cc, j) => (j === i
+                        ? { x: Math.min(1, Math.max(0, cur.x + dx)), y: Math.max(-200, Math.min(200, cur.y + dy)) }
+                        : cc)),
+                    });
+                  };
                   return (
                     <g
                       key={i}
+                      role="slider"
+                      tabIndex={0}
+                      aria-label={`Wire bend ${i + 1} of ${bendsLive!.length}`}
+                      aria-valuetext={`${Math.round(c.y)} px offset from the chord`}
+                      data-testid={`wire-bend-${w.id}-${i}`}
                       style={{ cursor: 'grab' }}
                       onPointerDown={(e) => beginBendDrag(w.id, i, a, b, e)}
                       onClick={(e) => e.stopPropagation()}
+                      onDoubleClick={(e) => { e.stopPropagation(); useEditor.getState().removeWireBend(w.id, i); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Delete' || e.key === 'Backspace') {
+                          e.preventDefault();
+                          useEditor.getState().removeWireBend(w.id, i);
+                          return;
+                        }
+                        const stepY = PITCH / 2;
+                        const stepX = PITCH / chordDist;
+                        if (e.key === 'ArrowUp') { e.preventDefault(); nudge(0, stepY * upSign); }
+                        else if (e.key === 'ArrowDown') { e.preventDefault(); nudge(0, -stepY * upSign); }
+                        else if (e.key === 'ArrowRight') { e.preventDefault(); nudge(stepX, 0); }
+                        else if (e.key === 'ArrowLeft') { e.preventDefault(); nudge(-stepX, 0); }
+                      }}
                     >
                       <circle cx={p.x} cy={p.y} r={6} fill="#fff" stroke="#d97706" strokeWidth={2} />
-                      <title>Drag the bend point</title>
+                      <title>Drag to move · double-click to remove · arrows nudge · Delete removes</title>
                     </g>
                   );
                 })}

@@ -1,5 +1,5 @@
-import type { Breadboard, HoleRef, Wire } from './types';
-import { colX, gapRouteBends, rowY } from './geometry';
+import type { Breadboard, HoleRef, RowName, Wire } from './types';
+import { ALL_ROWS, BOARD_SPECS, PITCH, boardDims, colX, gapRouteBends, fromChordSpace, rowY, toChordSpace } from './geometry';
 
 /**
  * Wire routing helpers (docs/wire-auto-routing-plan.md).
@@ -66,4 +66,36 @@ export function recomputeRoutePatch(w: Wire, boards: Breadboard[]): Partial<Wire
   if (w.from.board === w.to.board) return { bends: undefined, route: undefined };
   const bends = gapRouteBends(boards, w.from, w.to);
   return bends ? { bends } : { bends: undefined, route: undefined };
+}
+
+/**
+ * R1 — snap a manual bend to the board grid: the bend's workbench point locks
+ * onto a hole column (±3 px) and a hole row center (±3 px), so hand-routes
+ * look like real pre-bent jumpers on the 0.1" grid. Returns the input
+ * unchanged when the point is not near a grid line or lies between boards.
+ */
+export function snapChordBend(c: BendPt, a: { x: number; y: number }, b: { x: number; y: number }, boards: Breadboard[]): BendPt {
+  const p = fromChordSpace(a, b, c);
+  const bd = boards.find((x) => p.x >= (x.x ?? 0) && p.x <= (x.x ?? 0) + boardDims(x.kind).width);
+  if (!bd) return { ...c };
+  const ox = bd.x ?? 0;
+  const oy = bd.y ?? 0;
+  const dims = boardDims(bd.kind);
+  const lx = p.x - ox;
+  const ly = p.y - oy;
+  let sx = lx;
+  let sy = ly;
+  const col = Math.round((lx - dims.padX) / PITCH) + 1;
+  if (col >= 1 && col <= BOARD_SPECS[bd.kind].cols && Math.abs(colX(bd.kind, col) - lx) <= 3) {
+    sx = colX(bd.kind, col);
+  }
+  let bestRow: RowName | null = null;
+  let bestDist = 3.001;
+  for (const row of ALL_ROWS) {
+    const d = Math.abs(rowY(bd.kind, row) - ly);
+    if (d < bestDist) { bestDist = d; bestRow = row; }
+  }
+  if (bestRow) sy = rowY(bd.kind, bestRow);
+  if (sx === lx && sy === ly) return { ...c };
+  return toChordSpace(a, b, { x: ox + sx, y: oy + sy });
 }

@@ -7,7 +7,7 @@ import type {
 import {
   ALL_ROWS, BOARD_SPECS, boardDims, checkPlacement, holeExists, holeKey, pinCount, sameHole, wireColorFor,
 } from '@/lib/logibench/geometry';
-import { holeWorkbenchPos, recomputeRoutePatch, sanitizeBends } from '@/lib/logibench/route';
+import { holeWorkbenchPos, recomputeRoutePatch, sanitizeBends, snapChordBend } from '@/lib/logibench/route';
 import { buildNetlistCached } from '@/lib/logibench/netlist';
 import { autoPowerWires } from '@/lib/logibench/autowire';
 import { Simulator } from '@/lib/logibench/sim';
@@ -72,6 +72,10 @@ export interface EditorState {
   updatePart: (id: string, props: Partial<PartInstance['props']>) => void;
   /** wire tweaks from the Inspector/canvas (lift, color, re-termination, bends) */
   updateWire: (id: string, props: Partial<Pick<Wire, 'lift' | 'color' | 'from' | 'to' | 'bends' | 'route'>>) => void;
+  /** R1: insert a grid-snapped bend into a wire's route (chord-space point) */
+  addWireBend: (id: string, c: { x: number; y: number }) => void;
+  /** R1: remove one bend by index; collapses back to a plain arc when empty */
+  removeWireBend: (id: string, idx: number) => void;
   /** one-click power wiring for the selected chip / 555 module */
   wireChipPower: (partId: string) => void;
   /** drag-and-drop: move an existing part so its first pin lands on `anchor` */
@@ -320,6 +324,41 @@ export const useEditor = create<EditorState>((set, get) => ({
       // R6: computed routes follow re-termination (manual bends are kept as-is)
       if (props.from !== undefined || props.to !== undefined) {
         Object.assign(w, recomputeRoutePatch(w, p.boards));
+      }
+    });
+  },
+
+  addWireBend: (id, c) => {
+    get().commit((p) => {
+      const w = p.wires.find((x) => x.id === id);
+      if (!w) return;
+      const a = holeWorkbenchPos(p.boards, w.from);
+      const b = holeWorkbenchPos(p.boards, w.to);
+      const snapped = snapChordBend(c, a, b, p.boards);
+      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      // keep the polyline monotonic along the chord
+      const bends = sanitizeBends([...(w.bends ?? []), snapped].sort((u, v) => u.x - v.x), { dist });
+      if (bends) {
+        w.bends = bends;
+        delete w.route; // hand-edited routes are manual from here on
+      }
+    });
+  },
+
+  removeWireBend: (id, idx) => {
+    get().commit((p) => {
+      const w = p.wires.find((x) => x.id === id);
+      if (!w?.bends || idx < 0 || idx >= w.bends.length) return;
+      const a = holeWorkbenchPos(p.boards, w.from);
+      const b = holeWorkbenchPos(p.boards, w.to);
+      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      const bends = sanitizeBends(w.bends.filter((_, i) => i !== idx), { dist });
+      if (bends) {
+        w.bends = bends;
+        delete w.route;
+      } else {
+        delete w.bends;
+        delete w.route;
       }
     });
   },

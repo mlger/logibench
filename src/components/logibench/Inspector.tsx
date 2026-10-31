@@ -199,10 +199,17 @@ export default function Inspector() {
             ({wire.from.col},{wire.from.row}) → ({wire.to.col},{wire.to.row})
           </span>
         </div>
-        {crossBoard && (
-          <div>
-            <Label className="text-[11px] text-stone-500">Cross-board route</Label>
-            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+        <div>
+          <Label className="text-[11px] text-stone-500">Route</Label>
+          <div className={`mt-1.5 grid gap-1.5 ${crossBoard ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            <Button
+              variant="outline" size="sm"
+              title="Insert a bend at the middle of the wire — or double-click the wire on the canvas; drag bends to route around parts"
+              onClick={() => useEditor.getState().addWireBend(wire.id, { x: 0.5, y: 24 })}
+            >
+              <Route className="h-3.5 w-3.5" /> Add bend
+            </Button>
+            {crossBoard && (
               <Button
                 variant="outline" size="sm"
                 title="Bend the jumper through the gap between the boards (drag the bend points on the canvas)"
@@ -217,19 +224,19 @@ export default function Inspector() {
               >
                 <Route className="h-3.5 w-3.5" /> Via gap
               </Button>
-              <Button
-                variant="outline" size="sm" disabled={!wire.bends?.length}
-                title="Back to the plain arc"
-                onClick={() => useEditor.getState().updateWire(wire.id, { bends: undefined, route: undefined })}
-              >
-                Plain arc
-              </Button>
-            </div>
-            {wire.bends?.length ? (
-              <p className="mt-1 text-[11px] text-stone-500">Manhattan route — drag the bend points on the canvas. Double-click the wire to add a bend, double-click a bend to remove it.</p>
-            ) : null}
+            )}
+            <Button
+              variant="outline" size="sm" disabled={!wire.bends?.length}
+              title="Back to the plain arc"
+              onClick={() => useEditor.getState().updateWire(wire.id, { bends: undefined, route: undefined })}
+            >
+              Plain arc
+            </Button>
           </div>
-        )}
+          {wire.bends?.length ? (
+            <p className="mt-1 text-[11px] text-stone-500">Manhattan route — drag the bend points on the canvas. Double-click the wire to add a bend, double-click a bend (or press Delete on it) to remove it.</p>
+          ) : null}
+        </div>
         <div>
           <Label className="text-[11px] text-stone-500">Color</Label>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
