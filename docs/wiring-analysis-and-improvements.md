@@ -1,6 +1,6 @@
 # Breadboard Wiring — Analysis & Improvement Backlog
 
-**Status:** analysis only — nothing here is implemented yet.
+**Status:** P1–P3 IMPLEMENTED (see commit series `9b72ea8`…`6d01be1`, Oct 30 2026). P4 remains open.
 **Date:** 2026-10-30
 **Method:** read `netlist.ts`, `geometry.ts`, `erc.ts`, `sim.ts`, `projectStore.ts`, `BreadboardCanvas.tsx`, `demo.ts`; ran a throwaway wiring-stats script over the three golden demos (wire counts, spans, color histogram, chip-body crossings, bare-plastic landings, tie-point utilization).
 
@@ -95,10 +95,12 @@
 
 ---
 
-## 4. Suggested execution order (when approved)
+## 4. Suggested execution order
 
-1. P1-a, P1-b, P1-c, P1-d — one small PR, all testable via `bun run audit`-style scripts.
-2. P2-a + demo micro-fixes — one "wiring polish" PR; re-run browser E2E on all three labs.
-3. P2-b, P2-c, P2-d — ERC + editor increments, each with an audit check.
-4. P3 batch (a→f) — UX pass.
-5. P4-a — dedicated milestone (real 555), P4-b rides along if needed.
+- [x] 1. P1-a, P1-b, P1-c, P1-d — committed `9b72ea8`; covered by `bun scripts/audit/wiring-invariants.ts`.
+- [x] 2. P2-a + demo micro-fixes — committed `e432219`; labs-regression / lab3 audits stay green; browser E2E re-verified all three labs.
+- [x] 3. P2-b, P2-c, P2-d — committed `f358ff0` (reversed chip flips the netlist pin map end-to-end; weak-pull warns above 2.2 kΩ; smart power-wire colors).
+- [x] 4. P3 batch (a→f) — committed `6d01be1` (auto lift-side, tiered Lab 2 bundle, chord-space bends + Via-gap Manhattan routing, one-click power wiring with auto rail bridging, ERC→hole deep-link pulse, wire-end re-termination handles).
+- [ ] 5. P4-a — dedicated milestone (real 555 with RC network), P4-b rides along if needed.
+
+**Verification (browser, agent-browser):** Lab 2 decade sweep with correct 4511 decode; Lab 1 switch A → digit 1; reversed-chip toggle raises/clears `chip-reversed`; ERC issue click pulses the offending hole; Lab 3 `Via gap` produces distinct Manhattan bends for non-collinear jumpers; wire-end handles render when stopped; autowire on a bare board wires VCC + GND **and auto-bridges the dead +B rail** (3 wires, zero ERC errors); mobile 390 px layout holds; `dev.log` clean.
