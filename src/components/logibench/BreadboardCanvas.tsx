@@ -515,12 +515,15 @@ function CanvasInner(props: Props & { initialScale: number }) {
     );
   };
 
-  const renderBoardHoles = (b: Breadboard) => {
+  /** hole graphics — squares, sim level colors, hover-net halos. Painted BELOW the
+   *  wires so jumper strokes and their plug dots stay visible (a real jumper lies on
+   *  top of the board and plugs into the hole); never intercepts pointer events. */
+  const renderHoleVisuals = (b: Breadboard) => {
     const bx = dragBoard?.id === b.id ? dragBoard!.x : (b.x ?? 0);
     const by = dragBoard?.id === b.id ? dragBoard!.y : (b.y ?? 0);
     const cols = BOARD_SPECS[b.kind].cols;
     return (
-      <g key={b.id} transform={`translate(${bx},${by})`}>
+      <g key={b.id} transform={`translate(${bx},${by})`} pointerEvents="none">
         {rows.map((row) =>
           Array.from({ length: cols }, (_, ci) => {
             const col = ci + 1;
@@ -531,16 +534,43 @@ function CanvasInner(props: Props & { initialScale: number }) {
             const level = holeLevel(key);
             const inNet = netHoles?.has(key);
             const levelColor = level !== undefined ? LEVEL_COLORS[level] : undefined;
-            const isWireStart = wireStart && holeKey(wireStart) === key;
+            // driven holes grow slightly so the level color peeks around wire strokes and plug dots
+            const driven = levelColor !== undefined && levelColor !== 'transparent';
+            const half = driven ? 4.2 : 3.4;
             return (
               <g key={key}>
                 {inNet && <circle cx={p.x} cy={p.y} r={7} fill="#fbbf24" opacity={0.5} />}
                 <rect
-                  x={p.x - 3.4} y={p.y - 3.4} width={6.8} height={6.8} rx={1.4}
-                  fill={levelColor && levelColor !== 'transparent' ? levelColor : HOLE_FILL}
+                  x={p.x - half} y={p.y - half} width={half * 2} height={half * 2} rx={1.4}
+                  fill={driven ? levelColor : HOLE_FILL}
                   stroke={level === 'conflict' ? '#b45309' : HOLE_STROKE}
                   strokeWidth={level === 'conflict' ? 1.6 : 0.7}
                 />
+              </g>
+            );
+          }),
+        )}
+      </g>
+    );
+  };
+
+  /** hole hit areas + wire-start ring — one transparent layer per board, ABOVE the
+   *  wires so hole clicks/hovers always win over the wire click path. */
+  const renderHoleHitAreas = (b: Breadboard) => {
+    const bx = dragBoard?.id === b.id ? dragBoard!.x : (b.x ?? 0);
+    const by = dragBoard?.id === b.id ? dragBoard!.y : (b.y ?? 0);
+    const cols = BOARD_SPECS[b.kind].cols;
+    return (
+      <g key={b.id} transform={`translate(${bx},${by})`}>
+        {rows.map((row) =>
+          Array.from({ length: cols }, (_, ci) => {
+            const col = ci + 1;
+            if (!holeExists(b.kind, b.railLayout, row, col)) return null;
+            const key = `${b.id}:${col}:${row}`;
+            const p = { x: colX(b.kind, col), y: rowY(b.kind, row) };
+            const isWireStart = wireStart && holeKey(wireStart) === key;
+            return (
+              <g key={key}>
                 <rect
                   x={p.x - 7} y={p.y - 7} width={14} height={14} fill="transparent"
                   style={{ cursor: 'pointer' }}
@@ -584,7 +614,11 @@ function CanvasInner(props: Props & { initialScale: number }) {
           {/* board art — one group per board */}
           {boards.map((b) => renderBoardArt(b))}
 
-          {/* jumper wires — arced over the boards, under the hole hit areas */}
+          {/* hole graphics (squares / sim level colors / net halos) — below the wires so
+              jumper strokes and their plug dots paint over the board, like real wires */}
+          {boards.map((b) => renderHoleVisuals(b))}
+
+          {/* jumper wires — arced over the boards, above hole graphics, under the hole hit areas */}
           {project.wires.map((w) => {
             const a = pos(w.from);
             const b = pos(w.to);
@@ -668,8 +702,8 @@ function CanvasInner(props: Props & { initialScale: number }) {
           {/* board headers — above the wires so jumper arcs never shadow the grip */}
           {boards.map((b) => renderBoardHeader(b))}
 
-          {/* holes — one hit-area layer per board, above wires */}
-          {boards.map((b) => renderBoardHoles(b))}
+          {/* hole hit areas — above wires so hole clicks beat wire clicks (hole visuals live below) */}
+          {boards.map((b) => renderHoleHitAreas(b))}
 
           {/* parts — the wrapper g turns a press on a placed part into a move-drag */}
           {project.parts.map((part) => {
