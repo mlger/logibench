@@ -46,15 +46,19 @@ export function demo7447(): Project {
   const parts: PartInstance[] = [];
   const wires: Wire[] = [];
 
-  // supply directly on the rails
+  // supply directly on the rails; top and bottom rails bridged at col 1 like a
+  // real bench, so low-side parts reach the NEAR rail instead of arching over
+  // the whole board
   parts.push(part('supply', [[1, '+T'], [1, '-T']], { volts: 5 }));
+  wires.push(wire([1, '+T'], [1, '+B'], WIRE_COLORS.red));
+  wires.push(wire([1, '-T'], [1, '-B'], WIRE_COLORS.black));
 
   // 7447 (DIP16) at cols 3..10
   // pins e-row: 1=B(3) 2=C(4) 3=LT(5) 4=BI(6) 5=RBI(7) 6=D(8) 7=A(9) 8=GND(10)
   // pins f-row: 9=e(10) 10=d(9) 11=c(8) 12=b(7) 13=a(6) 14=g(5) 15=f(4) 16=VCC(3)
   parts.push(part('chip', [[3, 'e'], [4, 'e'], [5, 'e'], [6, 'e'], [7, 'e'], [8, 'e'], [9, 'e'], [10, 'e'],
     [10, 'f'], [9, 'f'], [8, 'f'], [7, 'f'], [6, 'f'], [5, 'f'], [4, 'f'], [3, 'f']], {}, '7447'));
-  wires.push(wire([3, 'h'], [3, '+T'], WIRE_COLORS.red));     // VCC pin 16 (same strip, one hole over)
+  wires.push(wire([3, 'h'], [3, '+B'], WIRE_COLORS.red));     // VCC pin 16 (same strip, one hole over)
   wires.push(wire([10, 'd'], [10, '-T'], WIRE_COLORS.black)); // GND pin 8
   wires.push(wire([5, 'd'], [5, '+T'], WIRE_COLORS.red));     // LT̅ high
   wires.push(wire([6, 'd'], [6, '+T'], WIRE_COLORS.red));     // BI/RBO open-or-high
@@ -65,7 +69,7 @@ export function demo7447(): Project {
   parts.push(part('seg7', [[13, 'e'], [14, 'e'], [15, 'e'], [16, 'e'], [17, 'e'],
     [17, 'f'], [16, 'f'], [15, 'f'], [14, 'f'], [13, 'f']], { polarity: 'CA', color: 'red' }));
   wires.push(wire([15, 'd'], [15, '+T'], WIRE_COLORS.red)); // common anode 3 (same strip as pin)
-  wires.push(wire([15, 'g'], [14, '+T'], WIRE_COLORS.red)); // common anode 8
+  wires.push(wire([15, 'g'], [15, '+B'], WIRE_COLORS.red)); // common anode 8 — bottom rail, no arch over the display
 
   // one 330 Ω per segment: leg1 in the 7447 output strip (row j), leg2 in the
   // display segment strip (row j if the display pin is on row f, row a if on row e)
@@ -97,12 +101,13 @@ export function demo7447(): Project {
     wires.push(wire([cfg.swCol + 1, 'a'], [cfg.swCol + 1, '+T'], WIRE_COLORS.red));
   });
 
-  // 0.1 µF decoupling across the 7447 power nets
-  parts.push(part('cap', [[3, 'g'], [10, 'b']], { farads: 1e-7 }));
+  // 0.1 µF decoupling across the 7447 power nets — the −T rail IS the GND net,
+  // so the cap sits locally instead of arcing over the whole chip
+  parts.push(part('cap', [[3, 'g'], [4, '-T']], { farads: 1e-7 }));
 
   p.parts = parts;
   p.wires = wires;
-  p.notes = 'MVP golden circuit #1. A closed switch feeds 1 (via the + rail); an open switch reads 0 through the 1 kΩ pull-down (LS IIL −0.4 mA → ≈0.4 V < VIL 0.8 V). Set the switches to spell BCD digits 0–9.';
+  p.notes = 'MVP golden circuit #1. A closed switch feeds 1 (via the + rail); an open switch reads 0 through the 1 kΩ pull-down (LS IIL −0.4 mA → ≈0.4 V < VIL 0.8 V). Set the switches to spell BCD digits 0–9. Top and bottom rails are bridged at column 1, so low-side parts reach the nearest rail.';
   return p;
 }
 
@@ -113,6 +118,10 @@ export function demo4511(): Project {
   const wires: Wire[] = [];
 
   parts.push(part('supply', [[1, '+T'], [1, '-T']], { volts: 5 }));
+  // bridge top ↔ bottom rails once at column 1 (bench practice): low-side
+  // connections use the NEAR rail instead of arching over the chips
+  wires.push(wire([1, '+T'], [1, '+B'], WIRE_COLORS.red));
+  wires.push(wire([1, '-T'], [1, '-B'], WIRE_COLORS.black));
 
   // 555 clock module: 1=V+(1,e) 2=GND(2,e) 3=OUT(3,e)
   parts.push(part('clock555', [[1, 'e'], [2, 'e'], [3, 'e']], { freqHz: 1 }));
@@ -126,7 +135,7 @@ export function demo4511(): Project {
   parts.push(part('chip', [[5, 'e'], [6, 'e'], [7, 'e'], [8, 'e'], [9, 'e'], [10, 'e'], [11, 'e'],
     [11, 'f'], [10, 'f'], [9, 'f'], [8, 'f'], [7, 'f'], [6, 'f'], [5, 'f']], {}, '7490'));
   wires.push(wire([9, 'd'], [9, '+T'], WIRE_COLORS.red));     // VCC = pin 5 !!
-  wires.push(wire([9, 'h'], [9, '-T'], WIRE_COLORS.black));   // GND = pin 10 !!
+  wires.push(wire([9, 'h'], [9, '-B'], WIRE_COLORS.black));   // GND = pin 10 !! (bottom rail — 2-row hop, not a full-height arch)
   wires.push(wire([6, 'd'], [6, '-T'], WIRE_COLORS.black));   // MR1 low
   wires.push(wire([7, 'd'], [7, '-T'], WIRE_COLORS.black));   // MR2 low
   wires.push(wire([10, 'd'], [10, '-T'], WIRE_COLORS.black)); // MS1 low
@@ -139,13 +148,15 @@ export function demo4511(): Project {
   // f-row: 9=e(21) 10=d(20) 11=c(19) 12=b(18) 13=a(17) 14=g(16) 15=f(15) 16=VCC(14)
   parts.push(part('chip', [[14, 'e'], [15, 'e'], [16, 'e'], [17, 'e'], [18, 'e'], [19, 'e'], [20, 'e'], [21, 'e'],
     [21, 'f'], [20, 'f'], [19, 'f'], [18, 'f'], [17, 'f'], [16, 'f'], [15, 'f'], [14, 'f']], {}, '4511', 'HCT'));
-  wires.push(wire([14, 'h'], [14, '+T'], WIRE_COLORS.red));   // VCC pin 16
+  wires.push(wire([14, 'h'], [14, '+B'], WIRE_COLORS.red));   // VCC pin 16 (bottom rail)
   wires.push(wire([21, 'd'], [21, '-T'], WIRE_COLORS.black)); // GND pin 8
   wires.push(wire([16, 'd'], [16, '+T'], WIRE_COLORS.red));   // LT̅ high
   wires.push(wire([17, 'd'], [17, '+T'], WIRE_COLORS.red));   // BI̅ high
   wires.push(wire([18, 'd'], [18, '-T'], WIRE_COLORS.black)); // LE low = transparent
 
-  // Q → BCD inputs (into the same strips as the pins, one row away)
+  // Q → BCD inputs (into the same strips as the pins, one row away).
+  // The four jumpers must cross by pinout (A is rightmost, D is 4th) — tiered
+  // arc heights keep the bundle readable instead of one overlapping knot.
   wires.push(wire([7, 'h'], [20, 'd'], WIRE_COLORS.teal));  // Q0 → A
   wires.push(wire([10, 'g'], [14, 'd'], WIRE_COLORS.teal)); // Q1 → B
   wires.push(wire([11, 'g'], [15, 'd'], WIRE_COLORS.teal)); // Q2 → C
@@ -156,7 +167,7 @@ export function demo4511(): Project {
   parts.push(part('seg7', [[24, 'e'], [25, 'e'], [26, 'e'], [27, 'e'], [28, 'e'],
     [28, 'f'], [27, 'f'], [26, 'f'], [25, 'f'], [24, 'f']], { polarity: 'CC', color: 'red' }));
   wires.push(wire([26, 'd'], [26, '-T'], WIRE_COLORS.black)); // common cathode 3
-  wires.push(wire([26, 'g'], [27, '-T'], WIRE_COLORS.black)); // common cathode 8
+  wires.push(wire([26, 'g'], [26, '-B'], WIRE_COLORS.black)); // common cathode 8 — bottom rail
 
   // one 330 Ω per segment
   const segs2: { outCol: number; dspCol: number; dspRow: 'a' | 'j' }[] = [
@@ -173,12 +184,12 @@ export function demo4511(): Project {
   }
 
   // 0.1 µF decoupling
-  parts.push(part('cap', [[14, 'g'], [21, 'b']], { farads: 1e-7 })); // 4511
-  parts.push(part('cap', [[9, 'b'], [9, 'g']], { farads: 1e-7 }));   // 7490
+  parts.push(part('cap', [[14, 'g'], [15, '-B']], { farads: 1e-7 })); // 4511 — local: VCC strip to the near GND rail
+  parts.push(part('cap', [[9, 'b'], [9, 'g']], { farads: 1e-7 }));    // 7490 — straddles the channel at col 9
 
   p.parts = parts;
   p.wires = wires;
-  p.notes = 'MVP golden circuit #2. The 555 module ticks at 1 Hz, the 7490 counts on falling edges (Q0→CP1 jumper makes it decade), the 4511 drives the common-cathode 5161AS. Note the 7490 power pins: 5 and 10! The 4511 is the HCT variant — TTL-threshold inputs (VIH 2.0 V) accept the 74LS90\'s VOH 2.7 V; plain HC (VIH 3.15 V) would be marginal.';
+  p.notes = 'MVP golden circuit #2. The 555 module ticks at 1 Hz, the 7490 counts on falling edges (Q0→CP1 jumper makes it decade), the 4511 drives the common-cathode 5161AS. Note the 7490 power pins: 5 and 10! Top and bottom rails are bridged at column 1 — the 7490 GND reaches the near − rail instead of arching over the chip. The 4511 is the HCT variant — TTL-threshold inputs (VIH 2.0 V) accept the 74LS90\'s VOH 2.7 V; plain HC (VIH 3.15 V) would be marginal.';
   return p;
 }
 
