@@ -7,6 +7,7 @@ import type {
 import {
   ALL_ROWS, BOARD_SPECS, boardDims, checkPlacement, holeExists, holeKey, pinCount, sameHole, wireColorFor,
 } from '@/lib/logibench/geometry';
+import { holeWorkbenchPos, recomputeRoutePatch, sanitizeBends } from '@/lib/logibench/route';
 import { buildNetlistCached } from '@/lib/logibench/netlist';
 import { autoPowerWires } from '@/lib/logibench/autowire';
 import { Simulator } from '@/lib/logibench/sim';
@@ -69,8 +70,8 @@ export interface EditorState {
   select: (sel: Selection) => void;
   deleteSelection: () => void;
   updatePart: (id: string, props: Partial<PartInstance['props']>) => void;
-  /** wire tweaks from the Inspector/canvas (lift, color, re-termination) */
-  updateWire: (id: string, props: Partial<Pick<Wire, 'lift' | 'color' | 'from' | 'to' | 'bends'>>) => void;
+  /** wire tweaks from the Inspector/canvas (lift, color, re-termination, bends) */
+  updateWire: (id: string, props: Partial<Pick<Wire, 'lift' | 'color' | 'from' | 'to' | 'bends' | 'route'>>) => void;
   /** one-click power wiring for the selected chip / 555 module */
   wireChipPower: (partId: string) => void;
   /** drag-and-drop: move an existing part so its first pin lands on `anchor` */
@@ -306,7 +307,20 @@ export const useEditor = create<EditorState>((set, get) => ({
   updateWire: (id, props) => {
     get().commit((p) => {
       const w = p.wires.find((x) => x.id === id);
-      if (w) Object.assign(w, props);
+      if (!w) return;
+      Object.assign(w, props);
+      // R7: bend hygiene — clamp/merge/degenerate-clean whatever comes in
+      if (props.bends !== undefined) {
+        const a = holeWorkbenchPos(p.boards, w.from);
+        const b = holeWorkbenchPos(p.boards, w.to);
+        const s = sanitizeBends(w.bends, { dist: Math.hypot(b.x - a.x, b.y - a.y) });
+        if (s) w.bends = s;
+        else { delete w.bends; delete w.route; }
+      }
+      // R6: computed routes follow re-termination (manual bends are kept as-is)
+      if (props.from !== undefined || props.to !== undefined) {
+        Object.assign(w, recomputeRoutePatch(w, p.boards));
+      }
     });
   },
 
@@ -538,7 +552,13 @@ export const useEditor = create<EditorState>((set, get) => ({
   moveBoard: (id, x, y) => {
     get().commit((p) => {
       const b = p.boards.find((x2) => x2.id === id);
-      if (b) { b.x = x; b.y = y; }
+      if (!b) return;
+      b.x = x; b.y = y;
+      // R6: via-gap routes re-thread through the gap at the new board position
+      for (const w of p.wires) {
+        if (w.route !== 'gap' || (w.from.board !== id && w.to.board !== id)) continue;
+        Object.assign(w, recomputeRoutePatch(w, p.boards));
+      }
     });
   },
 

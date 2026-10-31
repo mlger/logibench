@@ -212,7 +212,7 @@ export default function Inspector() {
                     useEditor.getState().setFlash('The boards touch — there is no gap to route through.');
                     return;
                   }
-                  useEditor.getState().updateWire(wire.id, { bends });
+                  useEditor.getState().updateWire(wire.id, { bends, route: 'gap' });
                 }}
               >
                 <Route className="h-3.5 w-3.5" /> Via gap
@@ -220,13 +220,13 @@ export default function Inspector() {
               <Button
                 variant="outline" size="sm" disabled={!wire.bends?.length}
                 title="Back to the plain arc"
-                onClick={() => useEditor.getState().updateWire(wire.id, { bends: undefined })}
+                onClick={() => useEditor.getState().updateWire(wire.id, { bends: undefined, route: undefined })}
               >
                 Plain arc
               </Button>
             </div>
             {wire.bends?.length ? (
-              <p className="mt-1 text-[11px] text-stone-500">Manhattan route — drag the bend points on the canvas.</p>
+              <p className="mt-1 text-[11px] text-stone-500">Manhattan route — drag the bend points on the canvas. Double-click the wire to add a bend, double-click a bend to remove it.</p>
             ) : null}
           </div>
         )}

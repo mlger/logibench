@@ -174,6 +174,10 @@ export interface Wire {
    *  (0..1), y = px along the left normal. See geometry.toChordSpace. When set,
    *  the wire renders as a polyline and `lift` is ignored. */
   bends?: { x: number; y: number }[];
+  /** route provenance: 'gap' = via-gap bends (recomputed when boards move or
+   *  the wire is re-terminated), 'auto' = suggested by the auto-router.
+   *  Absent = manual — bends follow endpoints but are never rewritten. */
+  route?: 'gap' | 'auto';
 }
 
 export interface Project {

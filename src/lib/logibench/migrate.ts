@@ -2,6 +2,7 @@ import type {
   Breadboard, BoardKind, HoleRef, PartInstance, PartType, Project, RailLayout, RowName, Wire,
 } from './types';
 import { ALL_ROWS, BOARD_SPECS, boardDims, holeExists } from './geometry';
+import { sanitizeBends } from './route';
 
 /**
  * Project sanitizer / migration (plan §8).
@@ -182,21 +183,20 @@ export function migrateProject(raw: unknown): MigrationResult | null {
       id = `w${wires.length + 1}-${Date.now().toString(36).slice(-3)}`;
     }
     const color = typeof rw.color === 'string' && /^#[0-9a-f]{3,8}$/i.test(rw.color) ? rw.color : '#27272a';
-    // arc-height override (±60 px, signed) and normalized bend points
+    // arc-height override (±60 px, signed); bends normalized/clamped/capped by
+    // the shared sanitizer; route provenance kept only when well-known
     const lift = num(rw.lift);
     const bends = Array.isArray(rw.bends)
-      ? rw.bends
+      ? sanitizeBends(rw.bends
           .filter((bp: unknown) => isObj(bp) && num((bp as Record<string, unknown>).x) !== undefined && num((bp as Record<string, unknown>).y) !== undefined)
-          .slice(0, 8)
-          .map((bp: Record<string, unknown>) => ({
-            x: Math.min(1, Math.max(0, num(bp.x)!)),
-            y: Math.max(-200, Math.min(200, num(bp.y)!)),
-          }))
+          .map((bp: Record<string, unknown>) => ({ x: num(bp.x)!, y: num(bp.y)! })))
       : undefined;
+    const route = rw.route === 'gap' || rw.route === 'auto' ? (rw.route as Wire['route']) : undefined;
     wires.push({
       id, from: rw.from, to: rw.to, color,
       ...(lift !== undefined ? { lift } : {}),
-      ...(bends && bends.length ? { bends } : {}),
+      ...(bends ? { bends } : {}),
+      ...(route ? { route } : {}),
     });
   }
 
